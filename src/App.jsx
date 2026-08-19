@@ -1,0 +1,222 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  LayoutDashboard, KanbanSquare, RotateCcw, Users, Bookmark, Archive as ArchiveIcon,
+  Search, Plus, LogOut, Loader2, X,
+} from 'lucide-react';
+import { useAuth } from './hooks/useAuth.jsx';
+import { api } from './lib/api.js';
+import { isExecutiveRole, roleLabel } from './lib/format.js';
+import { canCreateTask, EMPTY_FILTERS } from './lib/rules.js';
+import { GyftrLogo } from './components/GyftrLogo.jsx';
+import Login from './components/Login.jsx';
+import { Avatar } from './components/ui.jsx';
+import Dashboard from './views/Dashboard.jsx';
+import StakeholderHome from './views/StakeholderHome.jsx';
+import Board from './views/Board.jsx';
+import Reopened from './views/Reopened.jsx';
+import Archive from './views/Archive.jsx';
+import Stakeholders from './views/Stakeholders.jsx';
+import SavedViews from './views/SavedViews.jsx';
+import TaskDrawer from './components/TaskDrawer.jsx';
+import CreateTaskModal from './components/CreateTaskModal.jsx';
+
+// The Marketing Portal keeps navigation in the header, not a sidebar. Same here,
+// with the CEO Office's own information architecture in place of Marketing's.
+const EXEC_NAV = [
+  ['overview',     'Overview',     LayoutDashboard],
+  ['board',        'Kanban',       KanbanSquare],
+  ['reopened',     'Re-opened',    RotateCcw],
+  ['views',        'Saved Views',  Bookmark],
+  ['stakeholders', 'Stakeholders', Users],
+  ['archive',      'Archive',      ArchiveIcon],
+];
+const STAKE_NAV = [
+  ['overview', 'My Tasks', LayoutDashboard],
+  ['board',    'My Board', KanbanSquare],
+];
+
+export default function App() {
+  const { session, profile, signOut } = useAuth();
+  const [view, setView]           = useState('overview');
+  const [tasks, setTasks]         = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [q, setQ]                 = useState('');
+  const [filters, setFilters]     = useState(EMPTY_FILTERS);
+  const [openTaskId, setOpenTaskId] = useState(null);
+  const [creating, setCreating]   = useState(false);
+  const [menuOpen, setMenuOpen]   = useState(false);
+
+  const isExec = isExecutiveRole(profile?.role);
+
+  const refresh = useCallback(async () => {
+    if (!profile) return;
+    try { setTasks(await api.tasks()); setLoadError(''); }
+    catch (e) { console.error(e); setLoadError(e.message || 'Could not load tasks.'); setTasks([]); }
+  }, [profile]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  // Refetch when the tab regains focus — same behaviour as the Marketing Portal,
+  // which is how an EA watching the board sees a stakeholder's move appear.
+  useEffect(() => {
+    if (!profile) return;
+    const onFocus = () => refresh();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [profile, refresh]);
+
+  // A stakeholder must never land on an executive-only view, even via stale state.
+  useEffect(() => {
+    if (!isExec && !STAKE_NAV.some(([k]) => k === view)) setView('overview');
+  }, [isExec, view]);
+
+  const openTask = useMemo(
+    () => (tasks || []).find((t) => t.id === openTaskId) || null,
+    [tasks, openTaskId]
+  );
+
+  const filtered = useMemo(() => searchTasks(tasks, q), [tasks, q]);
+
+  if (session === undefined) return <BootScreen />;
+  if (!session || !profile) return <Login />;
+
+  const nav = isExec ? EXEC_NAV : STAKE_NAV;
+  const shared = {
+    tasks: filtered, allTasks: tasks, role: profile.role, me: profile,
+    onOpen: setOpenTaskId, refresh, setView, filters, setFilters,
+  };
+
+  return (
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {loadError && (
+        <div style={{ flex: 'none', padding: '7px 24px', background: '#FBE0EC', color: '#B01457', fontSize: 12.5, fontWeight: 600 }}>
+          Could not load tasks ({loadError}). Reload, or contact the CEO&apos;s Office.
+        </div>
+      )}
+
+      {/* ── Header — the Marketing Portal's exact shell ── */}
+      <header style={{ flex: 'none', height: 58, borderBottom: '1px solid var(--line)', background: 'var(--surface)',
+        display: 'flex', alignItems: 'center', gap: 18, padding: '0 24px' }}>
+        <GyftrLogo fs={20} />
+        <span style={{ width: 1, height: 24, background: 'var(--line)', margin: '0 2px' }} />
+
+        <nav style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {nav.map(([k, label, Icon]) => (
+            <button key={k} className={`gx-navitem gx-focusable${view === k ? ' on' : ''}`}
+              aria-current={view === k ? 'page' : undefined}
+              style={{ border: 'none', whiteSpace: 'nowrap', padding: '8px 11px',
+                background: view === k ? undefined : 'transparent' }}
+              onClick={() => setView(k)}>
+              <Icon size={16} /> {label}
+            </button>
+          ))}
+        </nav>
+
+        <div style={{ position: 'relative', marginLeft: 'auto', width: 230, flex: 'none' }}>
+          <Search size={14} aria-hidden="true"
+            style={{ position: 'absolute', left: 11, top: 10, color: '#94a59b', pointerEvents: 'none' }} />
+          <input className="gx-input" style={{ paddingLeft: 31, paddingRight: q ? 28 : 12 }}
+            placeholder="Search tasks, people…" aria-label="Search tasks"
+            value={q} onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => e.key === 'Escape' && setQ('')} />
+          {q && (
+            <button onClick={() => setQ('')} aria-label="Clear search"
+              style={{ position: 'absolute', right: 6, top: 7, background: 'none', border: 'none', cursor: 'pointer', color: '#94a59b', padding: 2 }}>
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        {canCreateTask(profile.role) && (
+          <button className="gx-btn gx-btn-dark gx-focusable" onClick={() => setCreating(true)}
+            style={{ whiteSpace: 'nowrap', flex: 'none' }}>
+            <Plus size={16} /> Create task
+          </button>
+        )}
+
+        <span style={{ width: 1, height: 24, background: 'var(--line)', flex: 'none' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, position: 'relative', flex: 'none' }}>
+          <Avatar name={profile.name} color={profile.color} size={30} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.1, whiteSpace: 'nowrap' }}>{profile.name}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--ink-soft)' }}>{roleLabel(profile.role)}</div>
+          </div>
+          <button onClick={() => setMenuOpen((v) => !v)} aria-label="Account menu" aria-expanded={menuOpen}
+            className="gx-focusable"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a59b', display: 'flex', padding: 2, marginLeft: 2 }}>
+            <LogOut size={16} />
+          </button>
+          {menuOpen && (
+            <>
+              <div onClick={() => setMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+              <div className="gx-card gx-fade" style={{ position: 'absolute', top: '115%', right: 0, zIndex: 50, padding: 6, width: 170,
+                boxShadow: '0 18px 50px -12px rgba(0,0,0,.3)' }}>
+                <div className="gx-menuitem" onClick={() => { setMenuOpen(false); signOut(); }}>
+                  <LogOut size={15} /> Sign out
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </header>
+
+      {/* ── Main ── */}
+      <main style={{ flex: 1, overflowY: 'auto', background: 'var(--paper)' }}>
+        <div style={{ padding: 24 }}>
+          {tasks === null ? <LoadingView /> : (
+            <>
+              {view === 'overview'     && (isExec ? <Dashboard {...shared} /> : <StakeholderHome {...shared} />)}
+              {view === 'board'        && <Board {...shared} />}
+              {view === 'reopened'     && isExec && <Reopened {...shared} />}
+              {view === 'archive'      && isExec && <Archive {...shared} />}
+              {view === 'stakeholders' && isExec && <Stakeholders />}
+              {view === 'views'        && isExec && <SavedViews {...shared} />}
+            </>
+          )}
+        </div>
+      </main>
+
+      {openTask && (
+        <TaskDrawer task={openTask} me={profile} onClose={() => setOpenTaskId(null)} refresh={refresh} />
+      )}
+      {creating && (
+        <CreateTaskModal onClose={() => setCreating(false)}
+          onCreated={(id) => { setCreating(false); refresh().then(() => setOpenTaskId(id)); }} />
+      )}
+    </div>
+  );
+}
+
+function BootScreen() {
+  return (
+    <div style={{ height: '100vh', display: 'grid', placeItems: 'center' }}>
+      <Loader2 size={22} style={{ animation: 'spin 1s linear infinite', color: 'var(--pop)' }} />
+    </div>
+  );
+}
+
+function LoadingView() {
+  return (
+    <div style={{ display: 'grid', placeItems: 'center', padding: 80 }}>
+      <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 600, color: 'var(--ink-soft)' }}>
+        Loading tasks…
+      </div>
+    </div>
+  );
+}
+
+// Search across title, description, task id and assignee name. Deliberately
+// simple — the dataset is small and an executive wants an instant answer.
+// Note this searches only what the server already returned, so a stakeholder
+// can never surface another stakeholder's task through it.
+export function searchTasks(tasks, q) {
+  if (!tasks) return tasks;
+  const s = q.trim().toLowerCase();
+  if (!s) return tasks;
+  return tasks.filter((t) =>
+    t.title.toLowerCase().includes(s) ||
+    (t.description || '').toLowerCase().includes(s) ||
+    String(t.id) === s.replace(/^#/, '') ||
+    (t.assignments || []).some((a) => a.stakeholder?.name?.toLowerCase().includes(s))
+  );
+}

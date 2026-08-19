@@ -1,0 +1,15 @@
+{
+  "name": "gyftr-ceo-portal-scripts",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Admin scripts (service-role): create stakeholders, seed demo data.",
+  "scripts": {
+    "seed": "node seed.mjs",
+    "create-stakeholder": "node create-stakeholder.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.5"
+  }
+}
