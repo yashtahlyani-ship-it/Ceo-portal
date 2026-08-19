@@ -9,39 +9,42 @@
 
 All demo accounts share the password **`Gyftr@Demo1!`**.
 
-> Synthetic data only — every name is invented, every address is
-> `@demo.gyftr.net`. No real employee information is used. Rotate this password
-> and remove these accounts before any real use.
+> **Names are real, credentials are throwaway.** The directory uses real names
+> and titles drawn from the sibling Gyftr portals (Marketing, Tech, Legal) so it
+> mirrors the actual organisation. Login emails are on `@demo.gyftr.net` — NOT
+> real corporate mailboxes — because every account shares one password. Rotate
+> the password and remove these accounts before any real use.
 
-| Role | Email |
-|---|---|
-| **Executive Assistant** (Super Admin) | `ea@demo.gyftr.net` |
-| **CEO** (Admin) | `ceo@demo.gyftr.net` |
+| Role | Name | Email |
+|---|---|---|
+| **Executive Assistant** (Super Admin) | Anushka Mishra | `ea@demo.gyftr.net` |
+| **CEO** (Admin) | Chief Executive | `ceo@demo.gyftr.net` |
 
-Stakeholders (15):
+Stakeholders (15) — login is `<first>.<last>@demo.gyftr.net` (single-name people
+use just the first name, e.g. `rajneesh@demo.gyftr.net`):
 
-| Email | Title |
-|---|---|
-| `aarav.mehta@demo.gyftr.net` | Head of Marketing |
-| `priya.nair@demo.gyftr.net` | Head of Product |
-| `rohan.gupta@demo.gyftr.net` | Head of Business |
-| `sana.kapoor@demo.gyftr.net` | Head of Engineering |
-| `vikram.rao@demo.gyftr.net` | Head of Finance |
-| `neha.verma@demo.gyftr.net` | Head of Operations |
-| `karan.shah@demo.gyftr.net` | Head of Sales |
-| `isha.reddy@demo.gyftr.net` | Head of Design |
-| `arjun.iyer@demo.gyftr.net` | Head of Data |
-| `meera.joshi@demo.gyftr.net` | Head of People |
-| `dev.malhotra@demo.gyftr.net` | Head of Partnerships |
-| `tara.singh@demo.gyftr.net` | Head of Legal |
-| `nikhil.bose@demo.gyftr.net` | Head of Support |
-| `ananya.das@demo.gyftr.net` | Head of Content |
-| `kabir.anand@demo.gyftr.net` | Head of Growth |
+| Name | Title | Email |
+|---|---|---|
+| Neha | Head of Business | `neha@demo.gyftr.net` |
+| Saurabh | Head of Product | `saurabh@demo.gyftr.net` |
+| Rajneesh | Chief Technology Officer | `rajneesh@demo.gyftr.net` |
+| Anandita | Head of Technology Delivery | `anandita@demo.gyftr.net` |
+| Karan | Head of Quality | `karan@demo.gyftr.net` |
+| Deepankar Hemnani | Head of Content | `deepankar.hemnani@demo.gyftr.net` |
+| Ajay Kumar | Head of Creative | `ajay.kumar@demo.gyftr.net` |
+| Nitin | Head of Legal | `nitin@demo.gyftr.net` |
+| Nikhil | Head of Compliance | `nikhil@demo.gyftr.net` |
+| Nikunj Kanodia | Head of Finance | `nikunj.kanodia@demo.gyftr.net` |
+| Anirudh Motwani | Head of Strategy | `anirudh.motwani@demo.gyftr.net` |
+| Rahul Joshi | Head of Partnerships | `rahul.joshi@demo.gyftr.net` |
+| Priya Sharma | Head of Marketing | `priya.sharma@demo.gyftr.net` |
+| Kushagra | Head of Legal Operations | `kushagra@demo.gyftr.net` |
+| Pankaj Mehta | Head of Operations | `pankaj.mehta@demo.gyftr.net` |
 
-The seed creates ~72 tasks with a deliberate spread — overdue, due today, due
+The seed creates ~64 tasks with a deliberate spread — overdue, due today, due
 this week, follow-ups due, reopened work, promised dates in all three states,
-multi-assignee tasks, comment threads and attachment metadata — so the dashboard
-is alive on first load.
+multi-assignee tasks and comment threads — plus four starter saved views — so the
+dashboard is alive on first load. Re-running `npm run seed` resets cleanly.
 
 ---
 
@@ -60,18 +63,18 @@ Sign in as `ceo@demo.gyftr.net` → **Create task**.
 | Description | Consolidated growth plan for the Q4 board review. |
 | Priority | High |
 | Expected date | 20 Sep 2026 |
-| Assign to | Aarav Mehta (Marketing), Priya Nair (Product), Rohan Gupta (Business) |
+| Assign to | Priya Sharma (Marketing), Saurabh (Product), Neha (Business) |
 
 The task appears on the Kanban as **three separate cards** — one per assignee.
 That is the multi-assignment model, visible immediately.
 
 ### 2 · Marketing sees only their own work
 
-Sign out, sign in as `aarav.mehta@demo.gyftr.net`.
+Sign out, sign in as `priya.sharma@demo.gyftr.net`.
 
 Notice what is *absent*: no Stakeholders, Saved Views, Re-opened or Archive nav;
-no Create task button; no stakeholder filter. The board shows Aarav's assignment
-only — **not** Priya's or Rohan's, and not their statuses or promised dates.
+no Create task button; no stakeholder filter. The board shows Priya's assignment
+only — **not** Saurabh's or Neha's, and not their statuses or promised dates.
 
 Open the task → **Progress** → propose a **Promised date** of `18 Sep 2026`.
 It reads *awaiting confirmation*. Nothing is locked yet.
@@ -84,25 +87,25 @@ It reads *awaiting confirmation*. Nothing is locked yet.
 Back as the CEO, open the task → **Progress**.
 
 All three assignees are listed with independent statuses and promised dates.
-Click **Confirm & lock** on Aarav's proposal.
+Click **Confirm & lock** on Priya's proposal.
 
-It becomes `18 Sep 2026 · confirmed` with a lock. Aarav can no longer change it —
+It becomes `18 Sep 2026 · confirmed` with a lock. Priya can no longer change it —
 attempting to raises *"This Promised Date has been confirmed and locked."*
 
 ### 4 · Marketing works the task forward
 
-As Aarav, move the card one stage at a time:
+As Priya, move the card one stage at a time:
 
 **To-Do → In Progress → Under Review → Done**
 
 Each step is a single button. There is no way to jump.
 
-Meanwhile Priya and Rohan are untouched — the executive board shows the task
+Meanwhile Saurabh and Neha are untouched — the executive board shows the task
 partially complete. **A task is only complete when every assignee is done.**
 
 ### 5 · CEO sends it back
 
-As the CEO, open Aarav's assignment → **Reopen**.
+As the CEO, open Priya's assignment → **Reopen**.
 
 Status becomes **Re-opened**. The Re-opened column appears on the board (it is
 not a permanent column — it exists only while something occupies it), and the
@@ -110,7 +113,7 @@ task now shows in the **Re-opened** view, grouped by stakeholder.
 
 ### 6 · Marketing reworks it
 
-As Aarav, the card sits in Re-opened. The only move offered is **Move to In
+As Priya, the card sits in Re-opened. The only move offered is **Move to In
 Progress** — rework rejoins the workflow, it does not shortcut to Done.
 
 Walk it forward again: **Re-opened → In Progress → Under Review → Done**.
@@ -123,9 +126,9 @@ The complete lifecycle, append-only, with actor, role and timestamp:
 
 ```
 task created
-stakeholder added          Aarav Mehta
-stakeholder added          Priya Nair
-stakeholder added          Rohan Gupta
+stakeholder added          Priya Sharma
+stakeholder added          Saurabh
+stakeholder added          Neha
 promised date proposed     → 18 Sep 2026
 promised date confirmed    18 Sep 2026, by CEO
 status changed             todo → in_progress

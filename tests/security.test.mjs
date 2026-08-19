@@ -17,8 +17,8 @@ import { anonClient, signIn, admin, DEMO_PASSWORD, freshTask, cleanup } from './
 
 const EA = 'ea@demo.gyftr.net';
 const CEO = 'ceo@demo.gyftr.net';
-const ALICE = 'aarav.mehta@demo.gyftr.net';   // stakeholder A
-const BOB = 'priya.nair@demo.gyftr.net';      // stakeholder B
+const ALICE = 'neha@demo.gyftr.net';   // stakeholder A
+const BOB = 'saurabh@demo.gyftr.net';      // stakeholder B
 
 test.after(cleanup);
 
