@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   LayoutDashboard, KanbanSquare, RotateCcw, Users, Bookmark, Archive as ArchiveIcon,
-  Search, Plus, LogOut, Loader2, X,
+  Search, Plus, LogOut, Loader2, X, CalendarClock,
 } from 'lucide-react';
 import { useAuth } from './hooks/useAuth.jsx';
 import { api } from './lib/api.js';
@@ -17,6 +17,7 @@ import Reopened from './views/Reopened.jsx';
 import Archive from './views/Archive.jsx';
 import Stakeholders from './views/Stakeholders.jsx';
 import SavedViews from './views/SavedViews.jsx';
+import Followups from './views/Followups.jsx';
 import TaskDrawer from './components/TaskDrawer.jsx';
 import CreateTaskModal from './components/CreateTaskModal.jsx';
 
@@ -25,6 +26,7 @@ import CreateTaskModal from './components/CreateTaskModal.jsx';
 const EXEC_NAV = [
   ['overview',     'Overview',     LayoutDashboard],
   ['board',        'Kanban',       KanbanSquare],
+  ['followups',    'Follow-ups',   CalendarClock],
   ['reopened',     'Re-opened',    RotateCcw],
   ['views',        'Saved Views',  Bookmark],
   ['stakeholders', 'Stakeholders', Users],
@@ -75,6 +77,24 @@ export default function App() {
     [tasks, openTaskId]
   );
 
+  // Deep-linking: mirror the open task in the URL hash (#task/<id>) so a task can
+  // be shared or reloaded straight into its drawer. RLS still applies — a hash to
+  // a task the viewer can't see simply resolves to nothing.
+  const openTaskById = useCallback((id) => {
+    setOpenTaskId(id);
+    const url = id ? `#task/${id}` : window.location.pathname + window.location.search;
+    window.history.replaceState(null, '', url);
+  }, []);
+  useEffect(() => {
+    const sync = () => {
+      const m = window.location.hash.match(/^#task\/(\d+)/);
+      setOpenTaskId(m ? Number(m[1]) : null);
+    };
+    sync();
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, []);
+
   const filtered = useMemo(() => searchTasks(tasks, q), [tasks, q]);
 
   if (session === undefined) return <BootScreen />;
@@ -83,7 +103,7 @@ export default function App() {
   const nav = isExec ? EXEC_NAV : STAKE_NAV;
   const shared = {
     tasks: filtered, allTasks: tasks, role: profile.role, me: profile,
-    onOpen: setOpenTaskId, refresh, setView, filters, setFilters,
+    onOpen: openTaskById, refresh, setView, filters, setFilters,
   };
 
   return (
@@ -167,6 +187,7 @@ export default function App() {
             <>
               {view === 'overview'     && (isExec ? <Dashboard {...shared} /> : <StakeholderHome {...shared} />)}
               {view === 'board'        && <Board {...shared} />}
+              {view === 'followups'    && isExec && <Followups {...shared} />}
               {view === 'reopened'     && isExec && <Reopened {...shared} />}
               {view === 'archive'      && isExec && <Archive {...shared} />}
               {view === 'stakeholders' && isExec && <Stakeholders />}
@@ -177,7 +198,7 @@ export default function App() {
       </main>
 
       {openTask && (
-        <TaskDrawer task={openTask} me={profile} onClose={() => setOpenTaskId(null)} refresh={refresh} />
+        <TaskDrawer task={openTask} me={profile} onClose={() => openTaskById(null)} refresh={refresh} />
       )}
       {creating && (
         <CreateTaskModal onClose={() => setCreating(false)}

@@ -426,6 +426,11 @@ function Activity({ task }) {
   if (items.length === 0) return <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>No activity yet.</span>;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+        <button className="gx-btn gx-btn-line gx-focusable" onClick={() => exportAuditCsv(task, items)}>
+          <Download size={14} /> Export CSV
+        </button>
+      </div>
       {items.map((e) => (
         <div key={e.id} style={{ display: 'flex', gap: 11, padding: '9px 0', borderBottom: '1px solid var(--line-soft)' }}>
           <div style={{ width: 6 }}><span className="gx-dot" style={{ background: 'var(--pop)', marginTop: 6 }} /></div>
@@ -443,6 +448,30 @@ function Activity({ task }) {
       ))}
     </div>
   );
+}
+
+// Download the audit trail as a CSV. Executive-only in practice (the Activity
+// tab is), and a plain client-side blob — nothing leaves the browser.
+function exportAuditCsv(task, items) {
+  const esc = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = ['When', 'Actor', 'Role', 'Action', 'Field', 'Old value', 'New value'];
+  const rows = items.map((e) => [
+    fmtDateTime(e.created_at), e.actor?.name || 'System', e.actor_role || '',
+    AUDIT_LABEL[e.action] || e.action, e.field || '', e.old_value ?? '', e.new_value ?? '',
+  ]);
+  const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\r\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `task-${task.id}-audit.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function friendlyError(e) {
