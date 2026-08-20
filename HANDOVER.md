@@ -209,7 +209,16 @@ Four real bugs, all fixed — but the shapes recur. Watch for them.
 4. **Do not wrap multiple controls in a `<label>`.** A label binds to exactly one
    control; wrapping three buttons made clicking the caption silently select the
    first. Use `role="group"` + `aria-label` (see `Field` in `src/components/ui.jsx`).
-5. **Adding a nav item can push the user chip off-screen.** The header holds a
+5. **A server-side flag is useless if the client never checks it.** The
+   `create-stakeholder` function correctly stamped `must_set_password: true`,
+   and an integration test asserted it — but `App.jsx` only rendered `<Login/>`
+   when there was *no* session. A first-time account signs in successfully, so
+   it had a session, and the "set a new password" screen could never mount. The
+   gate now lives in `App.jsx`'s render guard alongside the session check.
+   **The integration tests cannot catch this class of bug** — they verify the
+   server, not what the client does with the answer. Anything that gates the UI
+   on server state needs a real browser pass.
+6. **Adding a nav item can push the user chip off-screen.** The header holds a
    logo, seven nav items, search, a primary button and the user chip — it does
    not fit at 1280 without help. `src/lib/styles.js` has breakpoints that shed
    gaps, then the user's name text, then the nav labels, in that order.

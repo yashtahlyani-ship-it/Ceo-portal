@@ -444,8 +444,13 @@ test('only an executive can add a stakeholder, and the new account must set a pa
   const { data: users } = await admin.auth.admin.listUsers();
   const created = users.users.find((u) => u.email === email);
   assert.ok(created, 'the auth user exists');
+  // NOTE: this asserts the server SETS the flag. Whether the app actually holds
+  // the person on the set-password screen is a client-side render guard in
+  // App.jsx that no test here can reach — it shipped broken once precisely
+  // because this assertion passed while the UI let people straight through.
+  // Re-verify that path in a browser when touching auth. See HANDOVER.md §9.
   assert.equal(created.user_metadata.must_set_password, true,
-    'the account is held on the first-login password step');
+    'the account is stamped for the first-login password step');
 
   const { data: profile } = await admin.from('profiles').select('role, title, active').eq('id', created.id).single();
   assert.equal(profile.role, 'stakeholder', 'never created as an executive');
@@ -480,6 +485,42 @@ test('attachment metadata follows task visibility; stakeholders cannot upload', 
     uploaded_by: (await alice.auth.getUser()).data.user.id,
   });
   assert.ok(r.error, 'a stakeholder must not upload attachments');
+});
+
+test('a real file round-trips: executive uploads bytes, assignee downloads them, nobody else can', async () => {
+  const { taskId } = await freshTask({ assignees: [ALICE], title: 'attachment round-trip' });
+
+  // A genuine (tiny) PDF, pushed through the same anon-key path the browser uses.
+  const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a]);
+  const file = new Blob([bytes], { type: 'application/pdf' });
+  const path = `task/${taskId}/${crypto.randomUUID()}-brief.pdf`;
+
+  const ceo = await signIn(CEO);
+  const up = await ceo.storage.from('task-attachments')
+    .upload(path, file, { contentType: 'application/pdf' });
+  assert.equal(up.error, null, 'an executive can upload');
+
+  // The assignee can mint a signed URL and actually read the bytes back.
+  const alice = await signIn(ALICE);
+  const signed = await alice.storage.from('task-attachments').createSignedUrl(path, 60);
+  assert.equal(signed.error, null, 'an assignee can mint a signed URL');
+
+  const res = await fetch(signed.data.signedUrl);
+  assert.equal(res.ok, true, 'the signed URL actually serves the file');
+  const back = new Uint8Array(await res.arrayBuffer());
+  assert.deepEqual(back, bytes, 'the bytes round-trip unchanged');
+
+  // Bob holds no assignment on this task.
+  const bob = await signIn(BOB);
+  const foreign = await bob.storage.from('task-attachments').createSignedUrl(path, 60);
+  assert.ok(foreign.error || !foreign.data?.signedUrl, 'a non-assignee cannot mint a URL');
+
+  // And a stakeholder cannot upload at all.
+  const shUpload = await alice.storage.from('task-attachments')
+    .upload(`task/${taskId}/nope.pdf`, file, { contentType: 'application/pdf' });
+  assert.ok(shUpload.error, 'a stakeholder must not upload');
+
+  await admin.storage.from('task-attachments').remove([path]);
 });
 
 test('the attachments bucket is private and refuses a foreign task’s object', async () => {

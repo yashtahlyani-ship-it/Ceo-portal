@@ -7,17 +7,20 @@
 
 ## Accounts
 
-All demo accounts share one password. **It is deliberately not written down in
-this repository** — the repo is public and these accounts are live on a publicly
-reachable deployment, so a literal here would be a working CEO login for anyone
-who found it.
+Every account below signs in with:
 
-Where to get it:
+> **`Default@123`**
 
-- **Running locally?** It is `DEMO_PASSWORD` in your `.env` (gitignored).
-- **Joining the team?** Ask the CEO's Office for it directly.
-- **Setting up fresh?** Choose one, put it in `.env`, and run `npm run seed` —
-  every account below is created with it. See [HANDOVER.md](HANDOVER.md).
+> ⚠️ **MVP demo credential — change it before this tool carries real work.**
+> This repository is public and the deployment is publicly reachable, so this
+> password is effectively an open door to the demo data. It exists so the team
+> can evaluate the product without friction, nothing more. Before real use:
+> delete these `@demo.gyftr.net` accounts entirely and create real ones through
+> the app (each person then sets their own password at first sign-in).
+
+The value lives in `DEMO_PASSWORD` in `.env` (gitignored) — that is what
+`npm run seed` applies to every account and what the integration tests sign in
+with. To change it everywhere: edit `.env`, then `npm run seed`.
 
 > **Names are real, credentials are throwaway.** The directory uses real names
 > and titles drawn from the sibling Gyftr portals (Marketing, Tech, Legal) so it

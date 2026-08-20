@@ -38,7 +38,7 @@ const STAKE_NAV = [
 ];
 
 export default function App() {
-  const { session, profile, signOut } = useAuth();
+  const { session, profile, signOut, mustSetPassword } = useAuth();
   const [view, setView]           = useState('overview');
   const [tasks, setTasks]         = useState(null);
   const [loadError, setLoadError] = useState('');
@@ -98,7 +98,12 @@ export default function App() {
   const filtered = useMemo(() => searchTasks(tasks, q), [tasks, q]);
 
   if (session === undefined) return <BootScreen />;
-  if (!session || !profile) return <Login />;
+  // mustSetPassword has to be checked HERE, not only inside Login. A first-time
+  // account signs in successfully, so it has both a session and a profile — and
+  // without this clause the app would render the board and the "set a new
+  // password" step could never appear, because Login is not mounted once signed
+  // in. Login renders that step itself when the flag is set.
+  if (!session || !profile || mustSetPassword) return <Login />;
 
   const nav = isExec ? EXEC_NAV : STAKE_NAV;
   const shared = {
