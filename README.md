@@ -151,6 +151,7 @@ vercel deploy --prod
 
 | File | Contents |
 |---|---|
+| **[HANDOVER.md](HANDOVER.md)** | **Start here if you are new** — setup, operations, known state, traps |
 | [PROJECT_PLAN.md](PROJECT_PLAN.md) | What existed, what was built, decisions, risks, testing strategy |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Frontend, backend, auth, storage, where business logic lives |
 | [DATABASE.md](DATABASE.md) | Entities, relationships, indexes, RLS |

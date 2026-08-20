@@ -13,7 +13,14 @@
 // is deterministic and safe to re-run. Service role bypasses RLS.
 import { admin, ensureUser } from './lib.mjs';
 
-const DEMO_PASSWORD = 'Gyftr@Demo1!';
+// Read from .env (gitignored), never hard-coded — this repository is public and
+// these accounts are live on a publicly reachable deployment. See HANDOVER.md.
+const DEMO_PASSWORD = process.env.DEMO_PASSWORD;
+if (!DEMO_PASSWORD) {
+  console.error('Missing DEMO_PASSWORD in ../.env');
+  console.error('Set it to the password you want every demo account to share, then re-run.');
+  process.exit(1);
+}
 const today = new Date('2026-08-17');
 const iso = (d) => d.toISOString().slice(0, 10);
 const addDays = (n) => { const d = new Date(today); d.setDate(d.getDate() + n); return iso(d); };
@@ -156,7 +163,7 @@ async function main() {
 }
 
 function printLogins() {
-  console.log('\n── Demo logins (password for all: ' + DEMO_PASSWORD + ') ──');
+  console.log('\n── Demo logins (password for all: the DEMO_PASSWORD in your .env) ──');
   console.log('  EA  : ea@demo.gyftr.net   (Anushka Mishra · CEO\'s Office)');
   console.log('  CEO : ceo@demo.gyftr.net  (Chief Executive)');
   console.log('  Stakeholders: <first>.<last>@demo.gyftr.net — e.g. rajneesh@demo.gyftr.net, deepankar.hemnani@demo.gyftr.net');

@@ -183,7 +183,7 @@ Covered:
 
 ## Before real use
 
-1. **Rotate the demo password** (`Gyftr@Demo1!`) and remove or re-seed the
+1. **Rotate the demo password** (`DEMO_PASSWORD` in `.env`) and remove or re-seed the
    `@demo.gyftr.net` accounts.
 2. **Rotate the Supabase and Vercel access tokens** used to provision this
    project — they were shared in plaintext during setup.

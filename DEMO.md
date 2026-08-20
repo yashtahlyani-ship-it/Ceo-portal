@@ -7,13 +7,23 @@
 
 ## Accounts
 
-All demo accounts share the password **`Gyftr@Demo1!`**.
+All demo accounts share one password. **It is deliberately not written down in
+this repository** — the repo is public and these accounts are live on a publicly
+reachable deployment, so a literal here would be a working CEO login for anyone
+who found it.
+
+Where to get it:
+
+- **Running locally?** It is `DEMO_PASSWORD` in your `.env` (gitignored).
+- **Joining the team?** Ask the CEO's Office for it directly.
+- **Setting up fresh?** Choose one, put it in `.env`, and run `npm run seed` —
+  every account below is created with it. See [HANDOVER.md](HANDOVER.md).
 
 > **Names are real, credentials are throwaway.** The directory uses real names
 > and titles drawn from the sibling Gyftr portals (Marketing, Tech, Legal) so it
 > mirrors the actual organisation. Login emails are on `@demo.gyftr.net` — NOT
-> real corporate mailboxes — because every account shares one password. Rotate
-> the password and remove these accounts before any real use.
+> real corporate mailboxes — because every account shares one password. Remove
+> these accounts entirely before the tool carries real work.
 
 | Role | Name | Email |
 |---|---|---|

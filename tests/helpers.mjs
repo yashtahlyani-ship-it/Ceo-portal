@@ -24,7 +24,16 @@ if (!url || !anonKey || !serviceKey) {
   process.exit(1);
 }
 
-export const DEMO_PASSWORD = 'Gyftr@Demo1!';
+// The demo password is NOT hard-coded here. This repository is public, and a
+// literal would be a working CEO login for a live, publicly reachable site.
+// It lives in .env (gitignored) and is set on the accounts by the seed.
+export const DEMO_PASSWORD = process.env.DEMO_PASSWORD;
+
+if (!DEMO_PASSWORD) {
+  console.error('Missing DEMO_PASSWORD in ../.env — the integration tests sign in');
+  console.error('as the seeded demo accounts and need it. See HANDOVER.md.');
+  process.exit(1);
+}
 
 const noPersist = { auth: { autoRefreshToken: false, persistSession: false } };
 
