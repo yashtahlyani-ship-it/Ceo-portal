@@ -209,6 +209,15 @@ Four real bugs, all fixed — but the shapes recur. Watch for them.
 4. **Do not wrap multiple controls in a `<label>`.** A label binds to exactly one
    control; wrapping three buttons made clicking the caption silently select the
    first. Use `role="group"` + `aria-label` (see `Field` in `src/components/ui.jsx`).
+5. **Adding a nav item can push the user chip off-screen.** The header holds a
+   logo, seven nav items, search, a primary button and the user chip — it does
+   not fit at 1280 without help. `src/lib/styles.js` has breakpoints that shed
+   gaps, then the user's name text, then the nav labels, in that order.
+   **After adding a nav item, check the header at 1280px**:
+   ```js
+   const h = document.querySelector('header');
+   h.scrollWidth - h.clientWidth   // must be 0
+   ```
 
 ---
 

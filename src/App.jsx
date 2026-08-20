@@ -115,8 +115,8 @@ export default function App() {
       )}
 
       {/* ── Header — the Marketing Portal's exact shell ── */}
-      <header style={{ flex: 'none', height: 58, borderBottom: '1px solid var(--line)', background: 'var(--surface)',
-        display: 'flex', alignItems: 'center', gap: 18, padding: '0 24px' }}>
+      <header className="gx-hdr" style={{ flex: 'none', height: 58, borderBottom: '1px solid var(--line)',
+        background: 'var(--surface)', display: 'flex', alignItems: 'center', gap: 18, padding: '0 24px' }}>
         <GyftrLogo fs={20} />
         <span style={{ width: 1, height: 24, background: 'var(--line)', margin: '0 2px' }} />
 
@@ -124,15 +124,22 @@ export default function App() {
           {nav.map(([k, label, Icon]) => (
             <button key={k} className={`gx-navitem gx-focusable${view === k ? ' on' : ''}`}
               aria-current={view === k ? 'page' : undefined}
+              // The accessible name stays the full label even when the text is
+              // hidden at narrow widths, so the icon-only state is not mute.
+              aria-label={label} title={label}
               style={{ border: 'none', whiteSpace: 'nowrap', padding: '8px 11px',
                 background: view === k ? undefined : 'transparent' }}
               onClick={() => setView(k)}>
-              <Icon size={16} /> {label}
+              <Icon size={16} /> <span className="gx-navlabel">{label}</span>
             </button>
           ))}
         </nav>
 
-        <div style={{ position: 'relative', marginLeft: 'auto', width: 230, flex: 'none' }}>
+        {/* The search box is the only element allowed to shrink. Everything else
+            in the header is flex:none, so as nav items are added this absorbs
+            the pressure instead of pushing the user chip off-screen. */}
+        <div style={{ position: 'relative', marginLeft: 'auto',
+          flex: '0 1 230px', minWidth: 130 }}>
           <Search size={14} aria-hidden="true"
             style={{ position: 'absolute', left: 11, top: 10, color: '#94a59b', pointerEvents: 'none' }} />
           <input className="gx-input" style={{ paddingLeft: 31, paddingRight: q ? 28 : 12 }}
@@ -157,7 +164,9 @@ export default function App() {
         <span style={{ width: 1, height: 24, background: 'var(--line)', flex: 'none' }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, position: 'relative', flex: 'none' }}>
           <Avatar name={profile.name} color={profile.color} size={30} />
-          <div style={{ minWidth: 0 }}>
+          {/* Hidden below 1360px — the avatar and the account menu still carry
+              the identity, so nothing becomes unreachable. */}
+          <div className="gx-hdr-user" style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.1, whiteSpace: 'nowrap' }}>{profile.name}</div>
             <div style={{ fontSize: 10.5, color: 'var(--ink-soft)' }}>{roleLabel(profile.role)}</div>
           </div>

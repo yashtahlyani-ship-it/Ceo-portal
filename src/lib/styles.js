@@ -78,6 +78,29 @@ export const STYLES = `
 .gx-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:44px 20px;color:var(--ink-soft)}
 .gx-focusable:focus-visible{outline:2px solid var(--pop);outline-offset:2px;border-radius:8px}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+/* ─── Header width behaviour ───────────────────────────────────────────────
+   This is a desktop tool, but "desktop" spans 1280 → 1920. The header carries
+   a logo, seven nav items, search, a primary action and the user chip, which
+   does not fit at the low end. Rather than let the user chip slide off-screen,
+   the header sheds the least important things first, in this order:
+
+     ≤1440  tighter gaps
+     ≤1400  the user's name and role text (avatar + menu remain)
+     ≤1340  nav labels, leaving icons (aria-label and title keep them named)
+
+   Nav labels go before the search box on purpose: an icon-only nav item is
+   still reachable and still announced, whereas hiding search would remove a
+   capability outright.
+
+   !important is needed because the header sets gap inline.
+   If you add another nav item, re-check this at 1280. */
+@media (max-width:1440px){ .gx-hdr{gap:10px !important} }
+@media (max-width:1400px){ .gx-hdr-user{display:none} }
+@media (max-width:1340px){
+  .gx-navlabel{display:none}
+  .gx-hdr .gx-navitem{padding:8px 9px !important}
+}
 `;
 
 // ── Semantic colour maps ─────────────────────────────────────────────────────
