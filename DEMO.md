@@ -167,13 +167,27 @@ task can only ever land on their own board. Notice the summary is optional now,
 and the date is labelled **Due date**, not Expected date — the creator owns it,
 so there is no propose-then-confirm step.
 
-Priya Sharma already has one on the board: *"Draft my Q4 team plan"*, raised with
-no summary.
+Three already exist in the seed, so you can see this without creating one:
 
-Then sign in as the **EA** and find it: it carries a **Self-created** tag on the
-card, and *"Self-created by Priya Sharma"* in the drawer — so Anushka can tell at
-a glance what she assigned versus what people raised themselves. She keeps full
-edit and archive rights over it.
+| Task | Raised by |
+|---|---|
+| Draft my Q4 team plan | Neha (Business) |
+| Vendor renewal shortlist — *no summary* | Saurabh (Product) |
+| Refresh onboarding checklist | Rajneesh (CTO) |
+
+Sign in as the **EA** and find one: it carries a **Self-created** tag on the card,
+and *"Self-created by [Name]"* in the drawer — so Anushka can tell at a glance
+what she assigned versus what people raised themselves. She keeps full edit,
+archive and delete rights over it.
+
+**Archive vs Delete.** The drawer offers both. *Withdraw* (or *Archive*, for the
+EA) is reversible — it leaves the boards and can be restored. *Delete* is
+permanent: it destroys the task, its assignments, comments and attachments, and
+the confirmation says so. A stakeholder can only delete a task they raised
+themselves; the EA/CEO can delete any. Either way the **activity log keeps a
+record of the deletion** — open any task's Activity tab and you will see
+`permanently deleted` entries with the title and who did it, even though the task
+itself is gone. Delete is also available per-row in the **Archive** view.
 
 **Search in "Assign to".** As EA/CEO → Create task → type `legal` in the assignee
 search. Fifteen stakeholders narrow to two. It matches **title as well as name**,

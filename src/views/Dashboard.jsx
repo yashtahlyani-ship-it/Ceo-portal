@@ -6,6 +6,8 @@ import { EMPTY_FILTERS } from '../lib/rules.js';
 import { Metric, Avatar, PriorityBadge, StatusBadge, DueChip, Empty } from '../components/ui.jsx';
 import Board from './Board.jsx';
 
+const DASH_TABS = [['overview', 'Overview'], ['people', 'By stakeholder']];
+
 // The executive Overview — "what needs my attention right now?"
 //
 // Every metric is a link, not a readout: clicking one sets the board filters and
@@ -46,17 +48,29 @@ export default function Dashboard(props) {
 
       <div role="tablist" aria-label="Dashboard views"
         style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--line)', marginBottom: 20 }}>
-        {[['overview', 'Overview'], ['people', 'By stakeholder']].map(([k, label]) => (
-          <button key={k} role="tab" aria-selected={tab === k}
+        {/* Roving focus with arrow keys, matching the task drawer's tabs — one
+            tab stop for the set, then left/right to move between them. */}
+        {DASH_TABS.map(([k, label], i) => (
+          <button key={k} role="tab" id={`dashtab-${k}`} aria-selected={tab === k}
+            aria-controls={`dashpanel-${k}`} tabIndex={tab === k ? 0 : -1}
             className={`gx-tab gx-focusable${tab === k ? ' on' : ''}`}
             style={{ background: 'none', border: 'none', borderBottom: '2px solid transparent' }}
-            onClick={() => { setTab(k); setWho(null); }}>{label}</button>
+            onClick={() => { setTab(k); setWho(null); }}
+            onKeyDown={(e) => {
+              if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+              e.preventDefault();
+              const n = (i + (e.key === 'ArrowRight' ? 1 : DASH_TABS.length - 1)) % DASH_TABS.length;
+              setTab(DASH_TABS[n][0]); setWho(null);
+              document.getElementById(`dashtab-${DASH_TABS[n][0]}`)?.focus();
+            }}>{label}</button>
         ))}
       </div>
 
-      {tab === 'people'
-        ? <StakeholderView {...props} rows={rows} who={who} setWho={setWho} />
-        : <Overview {...{ m, rows, drill, attention, onOpen, setView }} />}
+      <div role="tabpanel" id={`dashpanel-${tab}`} aria-labelledby={`dashtab-${tab}`}>
+        {tab === 'people'
+          ? <StakeholderView {...props} rows={rows} who={who} setWho={setWho} />
+          : <Overview {...{ m, rows, drill, attention, onOpen, setView }} />}
+      </div>
     </div>
   );
 }

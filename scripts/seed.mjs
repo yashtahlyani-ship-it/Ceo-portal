@@ -21,8 +21,14 @@ if (!DEMO_PASSWORD) {
   console.error('Set it to the password you want every demo account to share, then re-run.');
   process.exit(1);
 }
-const today = new Date('2026-08-17');
-const iso = (d) => d.toISOString().slice(0, 10);
+// Relative to the day the seed RUNS, so "overdue" and "due today" stay true
+// whenever someone demos this. A frozen date silently ages the whole dataset.
+const today = new Date();
+// Local calendar date, NOT toISOString() — that is UTC, and east of Greenwich it
+// yields yesterday for most of the working day, seeding "due today" tasks that
+// render as already overdue. See HANDOVER.md §9.
+const iso = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const addDays = (n) => { const d = new Date(today); d.setDate(d.getDate() + n); return iso(d); };
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const some = (arr, n) => [...arr].sort(() => Math.random() - 0.5).slice(0, n);
@@ -102,13 +108,16 @@ async function main() {
   await reset();
 
   console.log('Creating executive accounts…');
-  const eaId = await ensureUser({ email: 'ea@demo.gyftr.net', password: DEMO_PASSWORD, name: 'Anushka Mishra', role: 'ea', title: "CEO's Office · Executive Assistant" });
-  const ceoId = await ensureUser({ email: 'ceo@demo.gyftr.net', password: DEMO_PASSWORD, name: 'Chief Executive', role: 'ceo', title: 'Chief Executive Officer' });
+  // mustSetPassword:false — DEMO accounts must sign straight in with the shared
+  // password. ensureUser defaults it to TRUE (correct for real onboarding), so
+  // omitting it here strands every demo login on "Set a new password".
+  const eaId = await ensureUser({ email: 'ea@demo.gyftr.net', password: DEMO_PASSWORD, name: 'Anushka Mishra', role: 'ea', title: "CEO's Office · Executive Assistant", mustSetPassword: false });
+  const ceoId = await ensureUser({ email: 'ceo@demo.gyftr.net', password: DEMO_PASSWORD, name: 'Chief Executive', role: 'ceo', title: 'Chief Executive Officer', mustSetPassword: false });
 
   console.log('Creating 15 stakeholders (real names, demo logins)…');
   const sh = [];
   for (const s of STAKEHOLDERS) {
-    const id = await ensureUser({ email: s.email, password: DEMO_PASSWORD, name: s.name, role: 'stakeholder', title: s.title });
+    const id = await ensureUser({ email: s.email, password: DEMO_PASSWORD, name: s.name, role: 'stakeholder', title: s.title, mustSetPassword: false });
     sh.push({ ...s, id });
   }
 
@@ -162,6 +171,29 @@ async function main() {
       await admin.from('tasks').update({ archived: true, archived_at: new Date().toISOString(), archived_by: creator }).eq('id', task.id);
     }
   }
+  // CR-01 #6: a few tasks stakeholders raised for themselves, so a fresh
+  // install can demonstrate the Self-created tag without anyone having to
+  // create one by hand first. `created_by` is a stakeholder, which is exactly
+  // what makes a task self-created — the app derives it, nothing is stored.
+  console.log('Creating self-raised tasks (CR-01 #6)…');
+  const SELF_RAISED = [
+    ['Draft my Q4 team plan', 'Headcount, budget and hiring sequence for the quarter.'],
+    ['Vendor renewal shortlist', ''],                       // deliberately no summary (CR-01 #1)
+    ['Refresh onboarding checklist', 'Ours is a year out of date.'],
+  ];
+  for (let i = 0; i < SELF_RAISED.length; i++) {
+    const owner = sh[i % sh.length];
+    const [title, description] = SELF_RAISED[i];
+    const { data: task, error } = await admin.from('tasks').insert({
+      title, description, priority: pick(PRIORITIES),
+      expected_date: addDays(5 + i * 4),
+      created_by: owner.id,          // ← a stakeholder, so this reads as self-created
+    }).select().single();
+    if (error) throw error;
+    // Exactly one assignment, to the person who raised it.
+    await admin.from('task_assignments').insert({ task_id: task.id, stakeholder_id: owner.id });
+  }
+
   console.log('✓ Seed complete.');
   printLogins();
 }
