@@ -98,7 +98,7 @@ frontend was largely skeletal and was completed.
 - Drawer accessibility: ARIA tablist with arrow-key roving focus, Escape to close
 - `supabase/04_storage.sql` — the private bucket and its policies (did not exist)
 - ESLint config matching Marketing's
-- 55 tests (see §5)
+- 61 tests (see §5)
 
 **Palette correction:** the scaffold had invented a red/amber/green priority
 scale. Replaced with Marketing's exact purple/blue/sky values, and CEO-specific
@@ -155,11 +155,11 @@ guard that could be forgotten. RLS was not changed.
 
 Two layers, with a deliberate split of responsibility.
 
-**Unit (`tests/logic.test.mjs`, 22 tests)** — pure functions, no network.
+**Unit (`tests/logic.test.mjs`, 23 tests)** — pure functions, no network.
 Transition rules, permission predicates, filters, dashboard derivations, date
 formatting, error copy.
 
-**Integration (`tests/security.test.mjs`, 33 tests)** — against the **real**
+**Integration (`tests/security.test.mjs`, 38 tests)** — against the **real**
 Supabase project, signing in as real users with the **anon key**: exactly the
 surface a browser has. The service role appears only to build fixtures and to
 independently verify what actually landed in the table — never to perform the

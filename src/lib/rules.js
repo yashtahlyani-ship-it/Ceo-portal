@@ -66,6 +66,13 @@ export const createsForSelfOnly = (role) => !isExecutiveRole(role);
 export const canEditOwnTask = (role, task, meId) =>
   !isExecutiveRole(role) && isSelfCreated(task) && task?.created_by === meId;
 
+// CR-01 #6: permanent, irreversible delete. Executives may delete any task; a
+// stakeholder may delete only a task they raised themselves. Archive remains
+// the default, reversible action — this is the deliberate one, and the UI
+// confirms it by name before calling either RPC.
+export const canDeleteTask = (role) => isExecutiveRole(role);
+export const canDeleteOwnTask = canEditOwnTask;
+
 // Overall task completion = every assignment is done.
 export const isTaskComplete = (task) =>
   (task.assignments?.length ?? 0) > 0 && task.assignments.every((a) => a.status === 'done');

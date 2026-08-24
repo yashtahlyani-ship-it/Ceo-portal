@@ -1,6 +1,6 @@
 # Database
 
-Postgres 17 on Supabase. Five migrations, run in order:
+Postgres 17 on Supabase. Six migrations, run in order:
 
 ```
 01_schema.sql     tables, enums, indexes
@@ -8,6 +8,7 @@ Postgres 17 on Supabase. Five migrations, run in order:
 03_policies.sql   row-level security
 04_storage.sql    private attachment bucket + policies
 05_cr01.sql       CR-01: stakeholder-raised tasks, created_at index
+06_cr01_delete.sql CR-01: permanent delete
 ```
 
 ---
@@ -134,7 +135,10 @@ Indexes: `task_id`, `created_at DESC`
 Actions recorded: `task_created`, `field_edited`, `status_changed`,
 `task_reopened`, `promised_proposed`, `promised_confirmed`, `stakeholder_added`,
 `stakeholder_removed`, `comment_added`, `attachment_added`, `attachment_removed`,
-`task_archived`, `task_restored`.
+`task_archived`, `task_restored`, `task_deleted`.
+
+`task_deleted` carries the title in `old_value`, written *before* the row is
+destroyed — otherwise the surviving audit row would point at nothing.
 
 ### `saved_views`
 `id` · `owner_id` · `name` · `filters` (jsonb) · `created_at` · `updated_at`
@@ -153,7 +157,7 @@ RLS is enabled on all seven tables. 19 policies.
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
 | `profiles` | self + executives + all executives' rows | executive | executive | — |
-| `tasks` | `can_see_task(id)` | executive | executive | **none** |
+| `tasks` | `can_see_task(id)` | executive | executive | **none** (delete only via RPC) |
 | `task_assignments` | executive **or** `stakeholder_id = auth.uid()` | executive | executive | executive |
 | `task_comments` | executive **or** own assignment | **none** | **none** | **none** |
 | `task_attachments` | `can_see_task(task_id)` | executive | — | executive |
@@ -163,7 +167,14 @@ RLS is enabled on all seven tables. 19 policies.
 
 Where a cell says **none**, no policy exists at all — the operation is impossible
 for every authenticated caller, including the CEO. That is how comment and audit
-immutability, and the "tasks are never destroyed" rule, are enforced.
+immutability are enforced.
+
+`tasks` still has **no DELETE policy**, so a direct `delete from tasks` is refused
+for everyone. CR-01 added permanent deletion, but only through two
+`SECURITY DEFINER` RPCs (`delete_task`, `delete_self_task`) that check their own
+rule — so the entry points stay exactly those two. Both record a `task_deleted`
+audit event before removing the row, and `audit_log.task_id` is
+`ON DELETE SET NULL`, so the history outlives the task.
 
 Stakeholder mutations reach the tables only through the `SECURITY DEFINER` RPCs,
 which check the rule and then write past RLS. This is why the direct-table

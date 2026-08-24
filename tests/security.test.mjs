@@ -555,6 +555,87 @@ test('an executive can still archive and edit a self-raised task', async () => {
   await admin.from('tasks').delete().eq('id', taskId);
 });
 
+/* ── CR-01 #6: permanent delete ──────────────────────────────────────────── */
+
+test('the creator can permanently delete a task they raised; nobody else can', async () => {
+  const alice = await signIn(ALICE);
+  const { data: taskId } = await alice.rpc('create_self_task', {
+    p_title: 'DEL self probe', p_description: '', p_priority: 'low', p_expected_date: null,
+  });
+
+  const bob = await signIn(BOB);
+  const theirs = await bob.rpc('delete_self_task', { p_task_id: taskId });
+  assert.ok(theirs.error, 'another stakeholder cannot delete it');
+
+  const mine = await alice.rpc('delete_self_task', { p_task_id: taskId });
+  assert.equal(mine.error, null, 'the creator can');
+
+  const { data: gone } = await admin.from('tasks').select('id').eq('id', taskId);
+  assert.deepEqual(gone ?? [], [], 'the row is genuinely destroyed, not archived');
+});
+
+test('a stakeholder cannot delete work assigned to them', async () => {
+  const { taskId } = await freshTask({ assignees: [ALICE], title: 'DEL assigned probe' });
+  const alice = await signIn(ALICE);
+
+  const viaSelf = await alice.rpc('delete_self_task', { p_task_id: taskId });
+  assert.ok(viaSelf.error, 'the self path is scoped to tasks they raised');
+  const viaExec = await alice.rpc('delete_task', { p_task_id: taskId });
+  assert.ok(viaExec.error, 'and the executive path is closed to them');
+
+  const { data } = await admin.from('tasks').select('id').eq('id', taskId);
+  assert.equal(data.length, 1, 'the task survives');
+});
+
+test('deleting a task cascades its assignments and comments away', async () => {
+  const { taskId, assignmentFor } = await freshTask({ assignees: [ALICE, BOB], title: 'DEL cascade probe' });
+  const alice = await signIn(ALICE);
+  await alice.rpc('add_comment', { p_assignment_id: assignmentFor(ALICE), p_body: 'will be destroyed' });
+
+  const before = await admin.from('task_assignments').select('id').eq('task_id', taskId);
+  assert.equal(before.data.length, 2);
+
+  const ceo = await signIn(CEO);
+  const { error } = await ceo.rpc('delete_task', { p_task_id: taskId });
+  assert.equal(error, null, 'an executive may delete any task');
+
+  const after = await admin.from('task_assignments').select('id').eq('task_id', taskId);
+  assert.deepEqual(after.data ?? [], [], 'assignments cascade');
+  const comments = await admin.from('task_comments').select('id').eq('task_id', taskId);
+  assert.deepEqual(comments.data ?? [], [], 'comments cascade');
+});
+
+test('the audit trail survives a delete and records what was destroyed', async () => {
+  const title = `DEL audit probe ${Date.now()}`;
+  const { taskId } = await freshTask({ assignees: [ALICE], title });
+
+  const ceo = await signIn(CEO);
+  await ceo.rpc('delete_task', { p_task_id: taskId });
+
+  // audit_log.task_id is ON DELETE SET NULL, so the row outlives the task —
+  // which is only useful because the title was recorded before it went.
+  const { data } = await admin.from('audit_log')
+    .select('action, old_value, actor_id, actor_role')
+    .eq('action', 'task_deleted').eq('old_value', title);
+
+  assert.equal(data.length, 1, 'the deletion is recorded');
+  assert.ok(data[0].actor_id, 'with the actor');
+  assert.equal(data[0].actor_role, 'ceo', 'and their role');
+});
+
+test('a direct REST delete on tasks is still refused for everyone', async () => {
+  // Deletion is reachable ONLY through the two SECURITY DEFINER RPCs. No DELETE
+  // policy was added to `tasks`, so the blast radius stays exactly those.
+  const { taskId } = await freshTask({ assignees: [ALICE], title: 'DEL direct probe' });
+
+  for (const who of [ALICE, CEO]) {
+    const c = await signIn(who);
+    await c.from('tasks').delete().eq('id', taskId);
+  }
+  const { data } = await admin.from('tasks').select('id').eq('id', taskId);
+  assert.equal(data.length, 1, 'the row survives a direct delete from anyone');
+});
+
 /* ── Stakeholder onboarding (Edge Function) ──────────────────────────────── */
 
 test('only an executive can add a stakeholder, and the new account must set a password', async () => {

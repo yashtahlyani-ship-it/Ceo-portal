@@ -19,6 +19,15 @@ const FK_CREATOR = 'tasks_created_by_fkey';
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const ACCEPTED_TYPES = '.pdf,.docx,.xlsx,.doc,.xls,.png,.jpg,.jpeg';
 
+// Best-effort bucket cleanup after a task row is destroyed. Deliberately does
+// not throw: the delete already succeeded server-side, and an object with no
+// surviving task is unreachable regardless.
+async function removeOrphanedObjects(paths) {
+  if (!paths?.length) return;
+  try { await supabase.storage.from(BUCKET).remove(paths); }
+  catch (e) { console.warn('[api] could not remove orphaned attachments:', e.message); }
+}
+
 const rpc = async (fn, args) => {
   const { data, error } = await supabase.rpc(fn, args);
   if (error) throw error;
@@ -165,8 +174,23 @@ export const api = {
     p_task_id: taskId, p_title: t.title, p_description: t.description || '',
     p_priority: t.priority || 'medium', p_expected_date: t.expected_date || null,
   }),
-  // "Withdraw" is an archive, not a destroy — tasks are never destroyed here.
+  // "Withdraw" archives — reversible, and the default action in the UI.
   archiveSelfTask: (taskId) => rpc('archive_self_task', { p_task_id: taskId }),
+
+  // ── Permanent delete (CR-01 #6) ────────────────────────────────────────────
+  // Irreversible. The RPC records a `task_deleted` audit event before removing
+  // the row, so the history survives, then returns the storage paths its
+  // attachments orphaned — removed here, because SQL cannot reach the bucket.
+  // A failure to clean the bucket is not fatal: with no task row, no storage
+  // policy grants access to those objects anyway.
+  async deleteTask(taskId) {
+    const paths = await rpc('delete_task', { p_task_id: taskId });
+    await removeOrphanedObjects(paths);
+  },
+  async deleteSelfTask(taskId) {
+    const paths = await rpc('delete_self_task', { p_task_id: taskId });
+    await removeOrphanedObjects(paths);
+  },
 
   advanceStatus: (assignmentId, target) => rpc('advance_status', { p_assignment_id: assignmentId, p_target: target }),
   proposePromised: (assignmentId, date) => rpc('propose_promised_date', { p_assignment_id: assignmentId, p_date: date }),

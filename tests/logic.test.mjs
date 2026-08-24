@@ -8,7 +8,8 @@ import assert from 'node:assert/strict';
 import {
   FORWARD_NEXT, allowedTargets, canReopen, canConfirmPromised, canProposePromised,
   canCreateTask, canEditTask, canArchive, canViewAudit, isTaskComplete,
-  isSelfCreated, canEditOwnTask, createsForSelfOnly, EMPTY_FILTERS,
+  isSelfCreated, canEditOwnTask, canDeleteTask, canDeleteOwnTask,
+  createsForSelfOnly, EMPTY_FILTERS,
 } from '../src/lib/rules.js';
 import { applyFilters, isFiltered, friendlyMoveError } from '../src/lib/filters.js';
 import { metrics, byStakeholder, toCards } from '../src/lib/derive.js';
@@ -172,6 +173,17 @@ test('CR-01 #6: a self-created task has no propose/confirm handshake', () => {
     'the creator already set the date');
   assert.equal(canConfirmPromised('ceo', { promised_state: 'proposed' }, SELF_TASK), false,
     'there is nothing for an executive to confirm');
+});
+
+test('CR-01 #6: permanent delete is executive-wide, or creator-scoped', () => {
+  // Executives may delete any task; a stakeholder only what they raised.
+  assert.equal(canDeleteTask('ea'), true);
+  assert.equal(canDeleteTask('ceo'), true);
+  assert.equal(canDeleteTask('stakeholder'), false);
+
+  assert.equal(canDeleteOwnTask('stakeholder', SELF_TASK, 'sh-1'), true);
+  assert.equal(canDeleteOwnTask('stakeholder', SELF_TASK, 'sh-2'), false, 'not someone else’s');
+  assert.equal(canDeleteOwnTask('stakeholder', EA_TASK, 'sh-1'), false, 'not assigned work');
 });
 
 test('CR-01 #6: a stakeholder may edit the task they raised, and only that one', () => {

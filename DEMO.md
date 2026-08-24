@@ -228,7 +228,7 @@ The interesting claims are not visual. To see them enforced at the server:
 npm run test:security
 ```
 
-33 tests that sign in as real users with the anon key — the same surface a
+38 tests that sign in as real users with the anon key — the same surface a
 browser has — and assert the database refuses. Skipping a stage, moving
 backward, touching a co-assignee's assignment, reading another person's comment
 thread, editing a comment, clearing the audit log, minting a signed URL for

@@ -55,9 +55,9 @@ npm run dev             # dev server
 npm run build           # production build
 npm run preview         # serve the production build locally
 npm run lint            # eslint  (expect 0 errors, ~9 warnings — see §8)
-npm test                # all 55 tests
-npm run test:unit       # 22 pure-logic tests, no network
-npm run test:security   # 33 tests against the REAL database
+npm test                # all 61 tests
+npm run test:unit       # 23 pure-logic tests, no network
+npm run test:security   # 38 tests against the REAL database
 npm run seed            # (re)create demo accounts + demo tasks
 ```
 
@@ -85,7 +85,7 @@ vercel env add VITE_SUPABASE_ANON_KEY production --force
 
 ## 5 · Running the database
 
-Five migrations, **run in this order** against a fresh project:
+Six migrations, **run in this order** against a fresh project:
 
 ```
 supabase/01_schema.sql      tables, enums, indexes
@@ -93,6 +93,7 @@ supabase/02_functions.sql   business logic, RPCs, audit triggers
 supabase/03_policies.sql    row-level security
 supabase/04_storage.sql     private attachment bucket + policies
 supabase/05_cr01.sql        CR-01: stakeholder-raised tasks
+supabase/06_cr01_delete.sql CR-01: permanent delete
 ```
 
 They are idempotent (`create or replace`, `drop policy if exists`), so
@@ -113,10 +114,10 @@ to match — and let `npm run test:security` confirm they agree.
 
 ## 6 · How this codebase is tested (and why it's unusual)
 
-`npm test` → **55 tests, all passing.**
+`npm test` → **61 tests, all passing.**
 
-- **22 unit tests** (`tests/logic.test.mjs`) — pure functions, no network.
-- **33 integration tests** (`tests/security.test.mjs`) — against the **real**
+- **23 unit tests** (`tests/logic.test.mjs`) — pure functions, no network.
+- **38 integration tests** (`tests/security.test.mjs`) — against the **real**
   Supabase project.
 
 The integration tests sign in as real users using the **anon key**, which is

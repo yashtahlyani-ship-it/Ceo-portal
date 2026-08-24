@@ -95,11 +95,10 @@ begin
 end $$;
 
 -- ── CR-6: the creator may withdraw their own self-created task ──────────────
--- CR-01 says "delete". This archives instead, deliberately: the product's
--- standing invariant is that a task is never destroyed (there is no DELETE
--- policy on `tasks` for anyone, including the CEO), and the audit trail must
--- stay answerable. Archived tasks leave every board and are restorable by the
--- EA/CEO, which is what "delete" means everywhere else in this tool.
+-- Withdrawing ARCHIVES: reversible, and the default action offered in the UI.
+-- Permanent deletion also exists as of 06_cr01_delete.sql (delete_self_task);
+-- this is the softer of the two, kept because most "I raised this by mistake"
+-- cases want a restore path rather than destruction.
 create or replace function archive_self_task(p_task_id bigint)
 returns void
 language plpgsql security definer set search_path = public as $$

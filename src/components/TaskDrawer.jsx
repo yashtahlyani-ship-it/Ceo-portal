@@ -8,7 +8,7 @@ import { STATUS } from '../lib/styles.js';
 import { fmtDate, fmtDateTime, roleLabel, isExecutiveRole } from '../lib/format.js';
 import {
   FORWARD_NEXT, canReopen, canConfirmPromised, canProposePromised, canEditTask, canArchive,
-  canViewAudit, isSelfCreated, canEditOwnTask,
+  canViewAudit, isSelfCreated, canEditOwnTask, canDeleteTask, canDeleteOwnTask,
 } from '../lib/rules.js';
 import { Avatar, PriorityBadge, StatusBadge, Empty, Skeleton } from './ui.jsx';
 
@@ -19,6 +19,7 @@ const AUDIT_LABEL = {
   stakeholder_removed: 'removed stakeholder', comment_added: 'commented',
   attachment_added: 'added an attachment', attachment_removed: 'removed an attachment',
   task_archived: 'archived the task', task_restored: 'restored the task',
+  task_deleted: 'permanently deleted',
 };
 
 export default function TaskDrawer({ task, me, onClose, refresh }) {
@@ -65,15 +66,36 @@ export default function TaskDrawer({ task, me, onClose, refresh }) {
               {canArchive(me.role) && !task.archived && (
                 <button className="gx-btn gx-btn-ghost gx-focusable" onClick={() => run(() => api.archiveTask(task.id).then(onClose))}><ArchiveIcon size={15} /> Archive</button>
               )}
-              {/* CR-01 #6: the creator may withdraw a task they raised. This
-                  archives rather than destroys, like every other "delete" here. */}
+              {/* CR-01 #6: the creator may withdraw a task they raised — the
+                  reversible option, offered first. */}
               {canEditOwnTask(me.role, task, me.id) && !task.archived && (
-                <button className="gx-btn gx-btn-ghost gx-focusable" style={{ color: '#C42424' }}
+                <button className="gx-btn gx-btn-ghost gx-focusable"
                   onClick={() => {
                     if (window.confirm(`Withdraw “${task.title}”? It leaves your board; the CEO’s Office can restore it.`)) {
                       run(() => api.archiveSelfTask(task.id).then(onClose));
                     }
-                  }}><Trash2 size={15} /> Withdraw</button>
+                  }}><ArchiveIcon size={15} /> Withdraw</button>
+              )}
+
+              {/* CR-01 #6: permanent delete. Irreversible, so the confirmation
+                  names what is destroyed rather than asking "are you sure?". */}
+              {(canDeleteTask(me.role) || canDeleteOwnTask(me.role, task, me.id)) && (
+                <button className="gx-btn gx-btn-ghost gx-focusable" style={{ color: '#C42424' }}
+                  title="Delete permanently"
+                  onClick={() => {
+                    const n = task.assignments?.length || 0;
+                    if (window.confirm(
+                      `Delete “${task.title}” permanently?\n\n`
+                      + `This destroys the task, its ${n} assignment${n === 1 ? '' : 's'}, `
+                      + `every comment and every attachment. It cannot be undone — `
+                      + `use Archive instead if you may want it back.\n\n`
+                      + `The activity log keeps a record that you deleted it.`
+                    )) {
+                      run(() => (canDeleteTask(me.role)
+                        ? api.deleteTask(task.id)
+                        : api.deleteSelfTask(task.id)).then(onClose));
+                    }
+                  }}><Trash2 size={15} /> Delete</button>
               )}
               <button className="gx-btn gx-btn-ghost gx-focusable" onClick={onClose} aria-label="Close"><X size={17} /></button>
             </div>

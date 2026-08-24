@@ -42,7 +42,11 @@ create policy tasks_insert on tasks for insert to authenticated
 drop policy if exists tasks_update on tasks;
 create policy tasks_update on tasks for update to authenticated
   using ( is_executive() ) with check ( is_executive() );
--- No DELETE policy anywhere: tasks are archived (soft-deleted), never destroyed.
+-- No DELETE policy anywhere, so a direct `delete from tasks` is refused for
+-- every authenticated caller including the CEO. CR-01 later added permanent
+-- deletion, but ONLY through the SECURITY DEFINER RPCs in 06_cr01_delete.sql,
+-- which check their own rule and record a task_deleted audit event first.
+-- Do not add a DELETE policy here: it would widen the entry points.
 
 -- ── task_assignments — the isolation core ────────────────────────────────────
 -- A stakeholder can read ONLY their own assignment rows. They therefore cannot

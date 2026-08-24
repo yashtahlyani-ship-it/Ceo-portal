@@ -13,6 +13,7 @@ prepared by the Executive Assistant. All six changes are live.
 | 4 | Expected-date filter removed, replaced by created date | `rules.js`, `filters.js`, `SavedViews.jsx` |
 | 5 | Stakeholder View on the dashboard | `Dashboard.jsx` |
 | 6 | Stakeholders can raise tasks for themselves | `05_cr01.sql`, `rules.js`, `CreateTaskModal.jsx`, `TaskDrawer.jsx` |
+| 6b | Permanent delete | `06_cr01_delete.sql`, `TaskDrawer.jsx`, `Archive.jsx` |
 
 ---
 
@@ -104,26 +105,52 @@ is a stakeholder. No boolean column to drift out of step with reality.
 | Self-created tasks carry a visible tag for the EA | **Implemented.** "Self-created" on the card, "Self-created by [Name]" in the drawer, plus a "Raised by" field. |
 | EA/CEO retain full edit and delete rights, no special protection | **Implemented as stated.** |
 
-#### One deviation, flagged
+#### Permanent delete
 
-The CR says the creator can **delete** their own task. This **archives** it
-instead, and the button reads *Withdraw*.
+The CR asks for **delete**, and delete is what it now does. This was initially
+shipped as archive-only, with the deviation flagged; on instruction it is now a
+real, irreversible delete (`06_cr01_delete.sql`).
 
-The reason is a standing invariant: no task is ever destroyed in this system.
-There is no `DELETE` policy on `tasks` for anyone, including the CEO — the audit
-trail has to stay answerable, and "delete" already means "archive" everywhere
-else in the tool. A withdrawn task leaves every board and the EA/CEO can restore
-it. If a true hard delete is genuinely wanted for self-raised tasks, that is a
-deliberate change to the audit model and worth a conversation first.
+| Who | May permanently delete |
+|---|---|
+| EA / CEO | any task |
+| Stakeholder | only a task they raised themselves |
+
+This reverses a standing invariant — until now nothing in this system could be
+destroyed. Three things keep it from becoming a hole:
+
+1. **The audit trail survives.** `audit_log.task_id` is `ON DELETE SET NULL`, so
+   its rows outlive the task — but they would be anchored to nothing. So the RPC
+   writes a `task_deleted` event **before** removing the row, recording the title
+   and the actor. The history still reads *"Priya Sharma permanently deleted
+   'Draft my Q4 team plan'"* after the task is gone.
+2. **No `DELETE` policy was added to `tasks`.** Deletion is reachable only
+   through the two `SECURITY DEFINER` functions, each checking its own rule. A
+   direct `delete from tasks` over the REST API is still refused for everyone,
+   including the CEO — verified by test.
+3. **Archive still exists and is still the default.** The drawer offers
+   *Withdraw* (reversible) before *Delete* (permanent), and the confirmation
+   names exactly what will be destroyed rather than asking "are you sure?".
+
+Attachment bytes live in storage, which SQL cannot reach, so the RPC returns the
+orphaned paths and the client removes them. That cleanup is best-effort and does
+not throw: with no task row, no storage policy grants access to those objects
+anyway.
+
+Delete is also available from the **Archive** view, which is where you decide
+something is genuinely finished with.
 
 ---
 
 ### Verification
 
-- **55 tests passing** (22 unit, 33 integration) — up from 44. New coverage:
+- **61 tests passing** (23 unit, 38 integration) — up from 44. New coverage:
   the self-created creation/edit/withdraw boundaries, the "cannot assign to
   others" boundary, the suppressed promised-date handshake, executives retaining
   authority over self-raised tasks, the created-date filter including its
-  timezone behaviour, and the due-bucket drill-through surviving the swap.
+  timezone behaviour, the due-bucket drill-through surviving the swap, and for
+  permanent delete: creator-only scoping, assigned work staying undeletable,
+  cascade behaviour, the audit trail surviving with the title recorded, and a
+  direct REST delete still being refused for everyone.
 - Walked through in the browser on production as CEO, EA and stakeholder.
 - 0 lint errors, clean build.

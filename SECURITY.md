@@ -56,7 +56,7 @@ performed by anyone authenticated, including the CEO:
 |---|---|
 | Edit or delete a comment | no `UPDATE`/`DELETE` policy on `task_comments` |
 | Edit or delete an audit row | no `UPDATE`/`DELETE` policy on `audit_log` |
-| Hard-delete a task | no `DELETE` policy on `tasks` |
+| Hard-delete a task **via the REST API** | no `DELETE` policy on `tasks` — permanent deletion exists, but only through `delete_task` / `delete_self_task`, which check their own rule |
 | Overwrite a stored object | no `UPDATE` policy on `storage.objects` |
 
 ---
@@ -161,7 +161,7 @@ Supabase is HTTPS-only. `vercel.json` sets `X-Content-Type-Options: nosniff`,
 
 ## Verification
 
-`npm run test:security` — **33 integration tests against the live database.**
+`npm run test:security` — **38 integration tests against the live database.**
 
 The methodology is the point: tests sign in as real users with the **anon key**,
 the same surface a browser has. The service role is used *only* to build fixtures
