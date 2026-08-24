@@ -43,7 +43,9 @@ adding them later.
 Chosen to match the existing internal ecosystem rather than by preference:
 
 - **React 19 + Vite 8** — same as the Marketing Portal frontend
-- **lucide-react** icons, **Recharts** — same libraries, same versions
+- **lucide-react** icons — same library, same version
+  (the Marketing Portal also uses Recharts; this product renders no charts, so
+  the dependency is not carried. Add it back if a chart view lands.)
 - **Supabase** (Postgres + Auth + Storage + Edge Functions) for the backend
 
 > **Why Supabase and not the Marketing Portal's Express + Cognito backend?**

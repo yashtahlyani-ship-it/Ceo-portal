@@ -174,8 +174,11 @@ They are kept as *warnings, not disabled*, so the advice stays visible — see t
 comment in `eslint.config.js`. Fixing them is a deliberate cross-product change,
 not a drive-by.
 
-**Bundle is ~490 kB (137 kB gzipped).** Recharts is the bulk of it and no view
-currently renders a chart. Dropping or code-splitting it is easy, safe cleanup.
+**Bundle is ~498 kB (139 kB gzipped).** It is React DOM, the Supabase client and
+lucide icons — there is no obvious fat to cut. (An earlier note here claimed
+Recharts dominated it; that was wrong. Recharts was never imported, so Vite
+tree-shook it entirely, and the dependency has since been removed. If a chart
+view is ever added, `npm i recharts` matches the Marketing Portal.)
 
 **No drag-and-drop on the Kanban.** Movement is explicit buttons and menus:
 keyboard-accessible, unambiguous, and every move writes an audit event. Drag

@@ -56,7 +56,7 @@ use just the first name, e.g. `rajneesh@demo.gyftr.net`):
 
 The seed creates ~64 tasks with a deliberate spread — overdue, due today, due
 this week, follow-ups due, reopened work, promised dates in all three states,
-multi-assignee tasks and comment threads — plus four starter saved views — so the
+multi-assignee tasks and comment threads — plus five starter saved views — so the
 dashboard is alive on first load. Re-running `npm run seed` resets cleanly.
 
 ---
@@ -157,6 +157,43 @@ clear it.
 
 ---
 
+## CR-01 additions (24 Aug 2026)
+
+Six changes shipped after launch. The ones worth demonstrating:
+
+**A stakeholder raising their own work.** Sign in as any stakeholder — there is
+now a **New task** button. The form has *no assignee picker at all*: a self-raised
+task can only ever land on their own board. Notice the summary is optional now,
+and the date is labelled **Due date**, not Expected date — the creator owns it,
+so there is no propose-then-confirm step.
+
+Priya Sharma already has one on the board: *"Draft my Q4 team plan"*, raised with
+no summary.
+
+Then sign in as the **EA** and find it: it carries a **Self-created** tag on the
+card, and *"Self-created by Priya Sharma"* in the drawer — so Anushka can tell at
+a glance what she assigned versus what people raised themselves. She keeps full
+edit and archive rights over it.
+
+**Search in "Assign to".** As EA/CEO → Create task → type `legal` in the assignee
+search. Fifteen stakeholders narrow to two. It matches **title as well as name**,
+so you can find the Head of Legal without knowing they are called Nitin.
+
+**Created-date filter.** On the Kanban, the date range now filters by *when a task
+was raised*, not when it is due — "show me everything raised between 1 and 15
+Aug". It is on each stakeholder's own board too.
+
+**The due-date tiles still work.** Overdue / Due today / Next 7 days were
+deliberately left alone by the filter swap. Click **Overdue** on the Overview: the
+board opens showing exactly that many cards, with a removable **Overdue** chip so
+you can see why it is filtered.
+
+**Stakeholder View.** On the Overview, switch to the **By stakeholder** tab: every
+stakeholder as a workload card (active / overdue / reopened / done). Click one to
+open their whole board in place, including anything they raised themselves.
+
+---
+
 ## Other things worth showing
 
 **Dashboard drill-through.** On the executive Overview, every metric is a link.
@@ -164,7 +201,7 @@ Click **Overdue**, **Due today**, **Next 7 days** or **Follow-ups due** and the
 board opens pre-filtered. Click any row in **Stakeholder overview** to filter the
 board to that person.
 
-**Saved Views.** Four starter views ship with the seed — *Executive Priorities*,
+**Saved Views.** Five starter views ship with the seed — *Executive Priorities*,
 *Overdue Tasks*, *Due This Week*, *Today's Follow-ups*. They are private to their
 owner: the EA cannot see the CEO's views. Create, rename and delete are all
 inline.
@@ -191,8 +228,9 @@ The interesting claims are not visual. To see them enforced at the server:
 npm run test:security
 ```
 
-26 tests that sign in as real users with the anon key — the same surface a
+33 tests that sign in as real users with the anon key — the same surface a
 browser has — and assert the database refuses. Skipping a stage, moving
 backward, touching a co-assignee's assignment, reading another person's comment
 thread, editing a comment, clearing the audit log, minting a signed URL for
-someone else's attachment: all refused, with no help from the UI.
+someone else's attachment, routing a self-raised task onto another person's
+board: all refused, with no help from the UI.

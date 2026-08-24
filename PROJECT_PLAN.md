@@ -91,14 +91,14 @@ frontend was largely skeletal and was completed.
   toggle, live rules checklist, password-manager hints)
 - Real first-login enforcement via a `must_set_password` metadata flag
 - Kanban **movement controls** — the board previously had none
-- Board filters (stakeholder, priority, status, expected-date range, follow-up due)
+- Board filters (stakeholder, priority, status, date range, follow-up due)
 - Dashboard metrics as click-through filters into the board
 - Attachments tab: upload, signed-URL download, delete, with size/type errors
 - Saved Views unified onto the board's own filter shape, plus rename
 - Drawer accessibility: ARIA tablist with arrow-key roving focus, Escape to close
 - `supabase/04_storage.sql` — the private bucket and its policies (did not exist)
 - ESLint config matching Marketing's
-- 43 tests
+- 55 tests (see §5)
 
 **Palette correction:** the scaffold had invented a red/amber/green priority
 scale. Replaced with Marketing's exact purple/blue/sky values, and CEO-specific
@@ -128,6 +128,26 @@ These were found by running the thing, not by reading it:
 5. **Header nav wrapped to two lines** at 1512px. Fixed with `nowrap` and
    `flex: none` on the fixed-width header elements.
 6. **Account menu stayed open through sign-out.**
+7. **The first-login password gate never rendered.** The server correctly stamped
+   `must_set_password` and a test asserted it, but `App.jsx` only mounted
+   `<Login/>` when there was no session — and a first-time account *has* a
+   session. New stakeholders went straight to the board. The integration tests
+   could not catch this: they verify the server, not what the client does with
+   the answer.
+
+---
+
+## 4b. CR-01 (24 Aug 2026)
+
+Six post-launch changes requested by the Executive Assistant, all shipped. Full
+detail, including two flagged interpretations and one deviation, is in
+[CHANGELOG.md](CHANGELOG.md).
+
+The structurally significant one is CR-6 — stakeholders may now raise tasks for
+themselves. It was implemented as a **separate, narrower RPC** rather than a
+loosened `create_task`, so the "a stakeholder cannot assign work to anyone else"
+guarantee is preserved by the shape of the function signature rather than by a
+guard that could be forgotten. RLS was not changed.
 
 ---
 
@@ -135,11 +155,11 @@ These were found by running the thing, not by reading it:
 
 Two layers, with a deliberate split of responsibility.
 
-**Unit (`tests/logic.test.mjs`, 17 tests)** — pure functions, no network.
+**Unit (`tests/logic.test.mjs`, 22 tests)** — pure functions, no network.
 Transition rules, permission predicates, filters, dashboard derivations, date
 formatting, error copy.
 
-**Integration (`tests/security.test.mjs`, 26 tests)** — against the **real**
+**Integration (`tests/security.test.mjs`, 33 tests)** — against the **real**
 Supabase project, signing in as real users with the **anon key**: exactly the
 surface a browser has. The service role appears only to build fixtures and to
 independently verify what actually landed in the table — never to perform the
@@ -161,7 +181,7 @@ bucket privacy, and stakeholder onboarding.
 | **Demo password is shared and printed** | Fine for a demo; must be rotated before real use. Documented in DEMO.md. |
 | **Two auth systems in the ecosystem** | Cognito (Marketing/Legal) and Supabase Auth (here). Users maintain two passwords. Acceptable at ~17 users; consolidating is a future call, not a v1 one. |
 | **No drag-and-drop on the Kanban** | Movement is via explicit buttons and menus — keyboard-accessible, unambiguous, and every move is audited. Drag would be additive, not a replacement. |
-| **Bundle is 484 kB (136 kB gzipped)** | Recharts dominates and is currently unused by any rendered view. Worth code-splitting or dropping if no chart lands. |
+| **Bundle is ~498 kB (139 kB gzipped)** | React DOM, the Supabase client and lucide icons. No obvious fat to cut. (An earlier revision of this row blamed Recharts — that was wrong; it was never imported, so Vite tree-shook it. The dependency has since been dropped.) |
 | **9 lint warnings** | React-Compiler-era rules from `react-hooks` v7 that the Marketing Portal also violates (53 occurrences there). Kept as warnings, not disabled — see the note in `eslint.config.js`. Fixing them is a cross-product change. |
 | **Attachment orphans** | If the metadata insert fails after an upload, the object is removed. If *that* cleanup fails, an unreferenced object remains — invisible to the app, but it consumes storage. |
 | **No notifications** | Explicitly out of scope. The dashboard is the monitoring mechanism. |
