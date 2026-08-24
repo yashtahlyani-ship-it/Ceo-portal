@@ -10,6 +10,9 @@ const BUCKET = 'task-attachments';
 // promised_confirmed_by — so an unqualified `profiles(...)` embed is ambiguous
 // and PostgREST refuses it. Name the constraint to pick the assignee.
 const FK_STAKEHOLDER = 'task_assignments_stakeholder_id_fkey';
+// tasks likewise has two (created_by, archived_by). The creator's role is what
+// makes a task "self-created" (CR-01 #6), so it is embedded on every read.
+const FK_CREATOR = 'tasks_created_by_fkey';
 // Kept in step with the bucket's own file_size_limit (supabase/04_storage.sql).
 // Checked here only so the person gets a clear message before a 10 MB upload
 // travels the wire; the bucket enforces it regardless.
@@ -63,6 +66,7 @@ export const api = {
     let q = supabase
       .from('tasks')
       .select(`*,
+        creator:profiles!${FK_CREATOR}(id,name,role),
         attachments:task_attachments(count),
         assignments:task_assignments(*,
           stakeholder:profiles!${FK_STAKEHOLDER}(id,name,title,color),
@@ -150,6 +154,20 @@ export const api = {
     p_expected_date: t.expected_date || null, p_followup_date: t.next_followup_date || null,
     p_stakeholders: t.stakeholders || [],
   }),
+
+  // CR-01 #6. A separate, narrower RPC on purpose: it takes no assignee list,
+  // so a stakeholder can never route a self-raised task to somebody else.
+  createSelfTask: (t) => rpc('create_self_task', {
+    p_title: t.title, p_description: t.description || '',
+    p_priority: t.priority || 'medium', p_expected_date: t.expected_date || null,
+  }),
+  updateSelfTask: (taskId, t) => rpc('update_self_task', {
+    p_task_id: taskId, p_title: t.title, p_description: t.description || '',
+    p_priority: t.priority || 'medium', p_expected_date: t.expected_date || null,
+  }),
+  // "Withdraw" is an archive, not a destroy — tasks are never destroyed here.
+  archiveSelfTask: (taskId) => rpc('archive_self_task', { p_task_id: taskId }),
+
   advanceStatus: (assignmentId, target) => rpc('advance_status', { p_assignment_id: assignmentId, p_target: target }),
   proposePromised: (assignmentId, date) => rpc('propose_promised_date', { p_assignment_id: assignmentId, p_date: date }),
   confirmPromised: (assignmentId) => rpc('confirm_promised_date', { p_assignment_id: assignmentId }),

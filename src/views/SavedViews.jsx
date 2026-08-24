@@ -156,13 +156,15 @@ function EditModal({ onClose, onSaved, onError }) {
         <Field label="Priority">{sel('priority', 'Any priority', PRIORITY)}</Field>
         <Field label="Status">{sel('status', 'Any status', STATUS)}</Field>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <Field label="Expected from">
-            <input className="gx-input" type="date" value={f.from}
-              onChange={(e) => setF({ ...f, from: e.target.value })} />
+          {/* CR-01 #4: the saved-view date range is created date, matching the
+              board's own control. Expected date is no longer a filter option. */}
+          <Field label="Created from">
+            <input className="gx-input" type="date" value={f.createdFrom}
+              onChange={(e) => setF({ ...f, createdFrom: e.target.value })} />
           </Field>
-          <Field label="Expected to">
-            <input className="gx-input" type="date" value={f.to}
-              onChange={(e) => setF({ ...f, to: e.target.value })} />
+          <Field label="Created to">
+            <input className="gx-input" type="date" value={f.createdTo}
+              onChange={(e) => setF({ ...f, createdTo: e.target.value })} />
           </Field>
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, marginBottom: 16 }}>

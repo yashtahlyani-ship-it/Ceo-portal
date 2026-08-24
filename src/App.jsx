@@ -6,7 +6,7 @@ import {
 import { useAuth } from './hooks/useAuth.jsx';
 import { api } from './lib/api.js';
 import { isExecutiveRole, roleLabel } from './lib/format.js';
-import { canCreateTask, EMPTY_FILTERS } from './lib/rules.js';
+import { canCreateTask, createsForSelfOnly, EMPTY_FILTERS } from './lib/rules.js';
 import { GyftrLogo } from './components/GyftrLogo.jsx';
 import Login from './components/Login.jsx';
 import { Avatar } from './components/ui.jsx';
@@ -159,10 +159,13 @@ export default function App() {
           )}
         </div>
 
+        {/* CR-01 #6: everyone may now raise a task. A stakeholder's lands on
+            their own board only — the label says so, and the modal has no
+            assignee picker at all in that mode. */}
         {canCreateTask(profile.role) && (
           <button className="gx-btn gx-btn-dark gx-focusable" onClick={() => setCreating(true)}
             style={{ whiteSpace: 'nowrap', flex: 'none' }}>
-            <Plus size={16} /> Create task
+            <Plus size={16} /> {createsForSelfOnly(profile.role) ? 'New task' : 'Create task'}
           </button>
         )}
 
@@ -215,7 +218,7 @@ export default function App() {
         <TaskDrawer task={openTask} me={profile} onClose={() => openTaskById(null)} refresh={refresh} />
       )}
       {creating && (
-        <CreateTaskModal onClose={() => setCreating(false)}
+        <CreateTaskModal me={profile} onClose={() => setCreating(false)}
           onCreated={(id) => { setCreating(false); refresh().then(() => setOpenTaskId(id)); }} />
       )}
     </div>

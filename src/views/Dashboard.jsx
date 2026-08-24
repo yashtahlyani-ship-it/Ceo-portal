@@ -1,19 +1,27 @@
-import { AlertTriangle, Users, ArrowRight } from 'lucide-react';
+import { useState } from 'react';
+import { AlertTriangle, Users, ArrowRight, ArrowLeft } from 'lucide-react';
 import { metrics, byStakeholder, toCards } from '../lib/derive.js';
 import { daysUntil, dueMeta } from '../lib/format.js';
 import { EMPTY_FILTERS } from '../lib/rules.js';
 import { Metric, Avatar, PriorityBadge, StatusBadge, DueChip, Empty } from '../components/ui.jsx';
+import Board from './Board.jsx';
 
 // The executive Overview — "what needs my attention right now?"
 //
 // Every metric is a link, not a readout: clicking one sets the board filters and
 // jumps there, so the number and the work behind it are never more than a click
 // apart. This is an operations screen, deliberately not an analytics dashboard.
-export default function Dashboard({ tasks, onOpen, setView, setFilters }) {
+export default function Dashboard(props) {
+  const { tasks, onOpen, setView, setFilters } = props;
+  // CR-01 #5: a second way to read the same data — by person rather than by
+  // urgency. Local to the dashboard rather than a new nav item, both because
+  // the CR asks for "a tab/section" on the dashboard and because an eighth
+  // header item would not fit (see the header note in lib/styles.js).
+  const [tab, setTab] = useState('overview');
+  const [who, setWho] = useState(null);
+
   const m = metrics(tasks);
   const rows = byStakeholder(tasks);
-
-  const today = localISO(0);
 
   // Focus the board on a slice and navigate to it.
   const drill = (patch) => { setFilters({ ...EMPTY_FILTERS, ...patch }); setView('board'); };
@@ -32,17 +40,38 @@ export default function Dashboard({ tasks, onOpen, setView, setFilters }) {
   return (
     <div className="gx-fade">
       <h1 className="gx-disp" style={{ fontSize: 24, fontWeight: 800, margin: '0 0 3px' }}>Overview</h1>
-      <p style={{ color: 'var(--ink-soft)', marginTop: 0, marginBottom: 20, fontSize: 13.5 }}>
+      <p style={{ color: 'var(--ink-soft)', marginTop: 0, marginBottom: 14, fontSize: 13.5 }}>
         What requires executive attention right now.
       </p>
 
+      <div role="tablist" aria-label="Dashboard views"
+        style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--line)', marginBottom: 20 }}>
+        {[['overview', 'Overview'], ['people', 'By stakeholder']].map(([k, label]) => (
+          <button key={k} role="tab" aria-selected={tab === k}
+            className={`gx-tab gx-focusable${tab === k ? ' on' : ''}`}
+            style={{ background: 'none', border: 'none', borderBottom: '2px solid transparent' }}
+            onClick={() => { setTab(k); setWho(null); }}>{label}</button>
+        ))}
+      </div>
+
+      {tab === 'people'
+        ? <StakeholderView {...props} rows={rows} who={who} setWho={setWho} />
+        : <Overview {...{ m, rows, drill, attention, onOpen, setView }} />}
+    </div>
+  );
+}
+
+/* ── The urgency-first overview ── */
+function Overview({ m, rows, drill, attention, onOpen, setView }) {
+  return (
+    <div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 22 }}>
         <Metric n={m.overdue} label="Overdue" tone="overdue"
-          onClick={() => drill({ to: localISO(-1) })} />
+          onClick={() => drill({ dueBucket: 'overdue' })} />
         <Metric n={m.today} label="Due today" tone="today"
-          onClick={() => drill({ from: today, to: today })} />
+          onClick={() => drill({ dueBucket: 'today' })} />
         <Metric n={m.next7} label="Next 7 days" tone="soon"
-          onClick={() => drill({ from: today, to: localISO(7) })} />
+          onClick={() => drill({ dueBucket: 'next7' })} />
         <Metric n={m.followups} label="Follow-ups due"
           onClick={() => drill({ followupsDue: true })} />
         <Metric n={m.reopened} label="Re-opened" tone="overdue"
@@ -108,6 +137,71 @@ export default function Dashboard({ tasks, onOpen, setView, setFilters }) {
   );
 }
 
+/* ── CR-01 #5: browse by stakeholder ──────────────────────────────────────────
+   Pick a person, see their whole board in one place — including tasks they
+   raised themselves. This is the same Board component the Kanban view uses,
+   pre-filtered to that stakeholder, so the cards, controls and audit behaviour
+   are identical rather than a second implementation that can drift. */
+function StakeholderView({ rows, who, setWho, ...boardProps }) {
+  if (who) {
+    const person = rows.find((r) => r.stakeholder.id === who)?.stakeholder;
+    return (
+      <div className="gx-fade">
+        <button className="gx-btn gx-btn-ghost gx-focusable" style={{ marginBottom: 14 }}
+          onClick={() => setWho(null)}>
+          <ArrowLeft size={14} /> All stakeholders
+        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 16 }}>
+          <Avatar name={person?.name} color={person?.color} size={38} />
+          <div>
+            <div className="gx-disp" style={{ fontSize: 18, fontWeight: 700 }}>{person?.name}</div>
+            <div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>{person?.title || 'Stakeholder'}</div>
+          </div>
+        </div>
+        {/* setFilters is a no-op here: the stakeholder is fixed by the person
+            you picked, so the board's own stakeholder control would fight it. */}
+        <Board {...boardProps} filters={{ ...EMPTY_FILTERS, stakeholder: who }} setFilters={() => {}} />
+      </div>
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <div className="gx-card">
+        <Empty icon={Users} title="No stakeholders yet"
+          hint="Add stakeholders to start assigning work." />
+      </div>
+    );
+  }
+
+  return (
+    <div className="gx-stagger" style={{ display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
+      {rows.map((r) => (
+        <button key={r.stakeholder.id} className="gx-kcard gx-focusable"
+          onClick={() => setWho(r.stakeholder.id)}
+          aria-label={`Open ${r.stakeholder.name}'s board`}
+          style={{ textAlign: 'left', border: '1px solid var(--line)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 11 }}>
+            <Avatar name={r.stakeholder.name} color={r.stakeholder.color} size={32} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5, whiteSpace: 'nowrap',
+                overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.stakeholder.name}</div>
+              <div style={{ fontSize: 11, color: 'var(--ink-soft)' }}>{r.stakeholder.title || 'Stakeholder'}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <Pill n={r.activeN} label="active" />
+            {r.overdue > 0 && <Pill n={r.overdue} label="overdue" tone="overdue" />}
+            {r.reopened > 0 && <Pill n={r.reopened} label="reopened" tone="warn" />}
+            {r.done > 0 && <Pill n={r.done} label="done" />}
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 const SectionHead = ({ icon: Icon, title, action }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 16px', fontWeight: 700, fontSize: 13.5 }}>
     <Icon size={16} style={{ color: 'var(--ink-soft)' }} aria-hidden="true" /> {title}
@@ -124,12 +218,4 @@ function Pill({ n, label, tone }) {
       <b className="gx-mono">{n}</b> {label}
     </span>
   );
-}
-
-// Local calendar date, not toISOString() — see the note in lib/format.js. Using
-// UTC here would make "due today" resolve to yesterday for most of an IST day.
-function localISO(offset) {
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }

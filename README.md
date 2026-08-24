@@ -27,7 +27,9 @@ creative production.
 | **Promised dates** | Stakeholder proposes → executive confirms → the date locks |
 | **Immutable audit** | Every mutation is recorded append-only, readable by EA/CEO only |
 | **Soft delete** | Tasks are archived and restorable, never destroyed |
+| **Stakeholder-raised tasks** | A stakeholder can raise a task for themselves only; the CEO's Office sees it tagged as self-created |
 | **Saved views** | Executives save reusable filtered slices of the board |
+| **Stakeholder view** | A dashboard tab that browses workload person by person |
 | **Private attachments** | PDF/DOCX/XLSX/PNG/JPG in a private bucket, reachable only via short-lived signed URLs |
 
 Notifications are deliberately **out of scope for v1** — the dashboard is the
@@ -78,6 +80,7 @@ supabase/01_schema.sql      tables, enums, indexes
 supabase/02_functions.sql   business logic, RPCs, audit triggers
 supabase/03_policies.sql    row-level security
 supabase/04_storage.sql     private attachment bucket + its policies
+supabase/05_cr01.sql        CR-01: stakeholder-raised tasks (see PROJECT_PLAN)
 ```
 
 Then deploy the Edge Function that lets the EA/CEO add stakeholders from inside
@@ -113,7 +116,7 @@ npm run test:security   # permission/workflow tests against the real database
 npm run seed            # demo data
 ```
 
-`npm test` runs **43 tests**: 17 unit tests over the pure rules, and 26
+`npm test` runs **55 tests**: 22 unit tests over the pure rules, and 33
 integration tests that sign in as real users with the anon key and assert that
 the *server* refuses what it should. See [SECURITY.md](SECURITY.md).
 
@@ -151,6 +154,7 @@ vercel deploy --prod
 
 | File | Contents |
 |---|---|
+| [CHANGELOG.md](CHANGELOG.md) | What changed and when — CR-01 onwards |
 | **[HANDOVER.md](HANDOVER.md)** | **Start here if you are new** — setup, operations, known state, traps |
 | [PROJECT_PLAN.md](PROJECT_PLAN.md) | What existed, what was built, decisions, risks, testing strategy |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Frontend, backend, auth, storage, where business logic lives |

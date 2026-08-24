@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   X, Lock, RotateCcw, Archive as ArchiveIcon, Send, ArrowRight, Check,
-  Paperclip, FileText, Download, Trash2,
+  Paperclip, FileText, Download, Trash2, UserPlus,
 } from 'lucide-react';
 import { api, ACCEPTED_TYPES } from '../lib/api.js';
 import { STATUS } from '../lib/styles.js';
 import { fmtDate, fmtDateTime, roleLabel, isExecutiveRole } from '../lib/format.js';
 import {
-  FORWARD_NEXT, canReopen, canConfirmPromised, canProposePromised, canEditTask, canArchive, canViewAudit,
+  FORWARD_NEXT, canReopen, canConfirmPromised, canProposePromised, canEditTask, canArchive,
+  canViewAudit, isSelfCreated, canEditOwnTask,
 } from '../lib/rules.js';
 import { Avatar, PriorityBadge, StatusBadge, Empty, Skeleton } from './ui.jsx';
 
@@ -54,9 +55,25 @@ export default function TaskDrawer({ task, me, onClose, refresh }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <PriorityBadge value={task.priority} />
             <span className="gx-mono" style={{ fontSize: 11.5, color: 'var(--ink-soft)' }}>#{task.id}</span>
+            {/* CR-01 #6 */}
+            {isSelfCreated(task) && (
+              <span className="gx-chip" style={{ background: '#EFE7FF', color: '#6A3BD1', cursor: 'default' }}>
+                <UserPlus size={11} /> Self-created by {task.creator?.name}
+              </span>
+            )}
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
               {canArchive(me.role) && !task.archived && (
                 <button className="gx-btn gx-btn-ghost gx-focusable" onClick={() => run(() => api.archiveTask(task.id).then(onClose))}><ArchiveIcon size={15} /> Archive</button>
+              )}
+              {/* CR-01 #6: the creator may withdraw a task they raised. This
+                  archives rather than destroys, like every other "delete" here. */}
+              {canEditOwnTask(me.role, task, me.id) && !task.archived && (
+                <button className="gx-btn gx-btn-ghost gx-focusable" style={{ color: '#C42424' }}
+                  onClick={() => {
+                    if (window.confirm(`Withdraw “${task.title}”? It leaves your board; the CEO’s Office can restore it.`)) {
+                      run(() => api.archiveSelfTask(task.id).then(onClose));
+                    }
+                  }}><Trash2 size={15} /> Withdraw</button>
               )}
               <button className="gx-btn gx-btn-ghost gx-focusable" onClick={onClose} aria-label="Close"><X size={17} /></button>
             </div>
@@ -106,23 +123,39 @@ function Overview({ task, me, run, busy }) {
   const [f, setF] = useState({ title: task.title, description: task.description, priority: task.priority, expected_date: task.expected_date || '', next_followup_date: task.next_followup_date || '' });
   useEffect(() => { setF({ title: task.title, description: task.description, priority: task.priority, expected_date: task.expected_date || '', next_followup_date: task.next_followup_date || '' }); }, [task]);
 
-  if (edit && canEditTask(me.role)) {
+  // Two routes into edit mode. An executive may edit any task via updateTask.
+  // CR-01 #6 adds a second: the stakeholder who RAISED a task may edit that one,
+  // through update_self_task — which the server scopes to the creator, so this
+  // never becomes a way to edit work assigned to them.
+  const asExec = canEditTask(me.role);
+  const asCreator = canEditOwnTask(me.role, task, me.id);
+  const mayEdit = asExec || asCreator;
+  const selfCreated = isSelfCreated(task);
+
+  if (edit && mayEdit) {
     return (
       <div>
         <label className="gx-th" style={{ background: 'transparent', padding: 0 }}>Title</label>
         <input className="gx-input" style={{ margin: '4px 0 12px' }} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} />
         <label className="gx-th" style={{ background: 'transparent', padding: 0 }}>Description</label>
         <textarea className="gx-input" rows={4} style={{ margin: '4px 0 12px', fontFamily: 'var(--font-b)' }} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <div><label className="gx-th" style={{ background: 'transparent', padding: 0 }}>Expected</label>
+        <div style={{ display: 'grid', gridTemplateColumns: asExec ? '1fr 1fr' : '1fr', gap: 12 }}>
+          <div><label className="gx-th" style={{ background: 'transparent', padding: 0 }}>{asExec ? 'Expected' : 'Due date'}</label>
             <input className="gx-input" type="date" style={{ marginTop: 4 }} value={f.expected_date || ''} onChange={(e) => setF({ ...f, expected_date: e.target.value })} /></div>
-          <div><label className="gx-th" style={{ background: 'transparent', padding: 0 }}>Follow-up</label>
-            <input className="gx-input" type="date" style={{ marginTop: 4 }} value={f.next_followup_date || ''} onChange={(e) => setF({ ...f, next_followup_date: e.target.value })} /></div>
+          {/* Follow-up dates are the CEO Office's chase mechanism, not the
+              stakeholder's — kept out of the self-created edit form. */}
+          {asExec && (
+            <div><label className="gx-th" style={{ background: 'transparent', padding: 0 }}>Follow-up</label>
+              <input className="gx-input" type="date" style={{ marginTop: 4 }} value={f.next_followup_date || ''} onChange={(e) => setF({ ...f, next_followup_date: e.target.value })} /></div>
+          )}
         </div>
         <div style={{ marginTop: 16, textAlign: 'right' }}>
           <button className="gx-btn gx-btn-ghost" onClick={() => setEdit(false)}>Cancel</button>
           <button className="gx-btn gx-btn-dark gx-focusable" disabled={busy}
-            onClick={() => run(() => api.updateTask(task.id, { title: f.title, description: f.description, priority: f.priority, expected_date: f.expected_date || null, next_followup_date: f.next_followup_date || null })).then(() => setEdit(false))}>Save changes</button>
+            onClick={() => run(() => (asExec
+              ? api.updateTask(task.id, { title: f.title, description: f.description, priority: f.priority, expected_date: f.expected_date || null, next_followup_date: f.next_followup_date || null })
+              : api.updateSelfTask(task.id, { title: f.title, description: f.description, priority: f.priority, expected_date: f.expected_date || null })
+            )).then(() => setEdit(false))}>Save changes</button>
         </div>
       </div>
     );
@@ -130,14 +163,22 @@ function Overview({ task, me, run, busy }) {
 
   return (
     <div>
-      <p style={{ fontSize: 13.5, lineHeight: 1.6, color: 'var(--ink)', whiteSpace: 'pre-wrap', marginTop: 0 }}>{task.description || 'No description.'}</p>
+      {/* Summary is optional as of CR-01 #1, so an empty one is normal now
+          rather than a gap someone forgot to fill. */}
+      <p style={{ fontSize: 13.5, lineHeight: 1.6, whiteSpace: 'pre-wrap', marginTop: 0,
+        color: task.description ? 'var(--ink)' : 'var(--ink-soft)',
+        fontStyle: task.description ? 'normal' : 'italic' }}>
+        {task.description || 'No summary.'}
+      </p>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 18 }}>
-        <Meta label="Expected date" value={fmtDate(task.expected_date)} />
+        <Meta label={selfCreated ? 'Due date' : 'Expected date'} value={fmtDate(task.expected_date)} />
         <Meta label="Next follow-up" value={fmtDate(task.next_followup_date)} />
         <Meta label="Assignees" value={`${task.assignments?.length || 0}`} />
         <Meta label="Created" value={fmtDateTime(task.created_at)} />
+        <Meta label="Raised by"
+          value={task.creator?.name ? `${task.creator.name}${selfCreated ? ' (self)' : ''}` : '—'} />
       </div>
-      {canEditTask(me.role) && (
+      {mayEdit && (
         <button className="gx-btn gx-btn-line gx-focusable" style={{ marginTop: 18 }} onClick={() => setEdit(true)}>Edit details</button>
       )}
     </div>
@@ -161,7 +202,7 @@ function Progress({ task, me, isExec, run, busy }) {
   );
 }
 
-function AssignmentRow({ a, me, isExec, run, busy }) {
+function AssignmentRow({ a, task, me, isExec, run, busy }) {
   const isOwner = a.stakeholder_id === me.id;
   const next = FORWARD_NEXT[a.status];
   const [pdate, setPdate] = useState(a.promised_proposed || '');
@@ -208,15 +249,21 @@ function AssignmentRow({ a, me, isExec, run, busy }) {
         ) : a.promised_state === 'proposed' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
             <span className="gx-chip" style={{ background: '#FFEFD6', color: '#9A5B00', cursor: 'default' }}>Proposed {fmtDate(a.promised_proposed)} · awaiting confirmation</span>
-            {canConfirmPromised(me.role, a) && (
+            {canConfirmPromised(me.role, a, task) && (
               <button className="gx-btn gx-btn-dark gx-focusable" disabled={busy} onClick={() => run(() => api.confirmPromised(a.id))}>Confirm & lock</button>
             )}
           </div>
-        ) : canProposePromised(me.role, a, isOwner) ? (
+        ) : canProposePromised(me.role, a, isOwner, task) ? (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input className="gx-input" type="date" style={{ width: 'auto' }} value={pdate} onChange={(e) => setPdate(e.target.value)} />
             <button className="gx-btn gx-btn-line gx-focusable" disabled={busy || !pdate} onClick={() => run(() => api.proposePromised(a.id, pdate))}>Propose date</button>
           </div>
+        ) : isSelfCreated(task) ? (
+          // CR-01 #6: no propose → confirm handshake here. Say why, rather than
+          // leaving an empty slot that looks like something is missing.
+          <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>
+            Not applicable — {fmtDate(task.expected_date)} was set by the person who raised this task.
+          </span>
         ) : (
           <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>Not yet proposed.</span>
         )}

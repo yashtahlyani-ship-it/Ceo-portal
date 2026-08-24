@@ -42,6 +42,13 @@ caller may see, so even a hand-built query returns nothing extra.
 writing. Stakeholders have no direct write policy on any table; their changes
 happen only through these functions.
 
+CR-01 added a second task-creation path for stakeholders. It is a **separate,
+narrower RPC** (`create_self_task`) rather than a loosened `create_task`: it
+accepts no assignee list, so a stakeholder-raised task can only ever assign its
+own creator. `create_task` remains executive-only, and `add_stakeholder` still
+refuses stakeholders — including on a task they raised themselves. Row-level
+security was not changed by CR-01.
+
 **3. Impossible operations** — where no policy exists, the operation cannot be
 performed by anyone authenticated, including the CEO:
 
@@ -154,7 +161,7 @@ Supabase is HTTPS-only. `vercel.json` sets `X-Content-Type-Options: nosniff`,
 
 ## Verification
 
-`npm run test:security` — **26 integration tests against the live database.**
+`npm run test:security` — **33 integration tests against the live database.**
 
 The methodology is the point: tests sign in as real users with the **anon key**,
 the same surface a browser has. The service role is used *only* to build fixtures
@@ -178,6 +185,7 @@ Covered:
 | Saved views | private to owner; a stakeholder cannot create one |
 | Attachments | visible to assignees, hidden from non-assignees; stakeholder upload refused; bucket private; non-assignee cannot mint a signed URL |
 | Onboarding | stakeholder cannot call `create-stakeholder`; CEO can; new account is a stakeholder with the first-login flag set |
+| Self-raised tasks (CR-01) | a stakeholder may raise one for themselves; it is invisible to other stakeholders; it cannot be routed to anyone else; only the creator may edit or withdraw it; work assigned *to* them stays read-only; the promised-date handshake is refused; executives keep full authority over it |
 
 ---
 

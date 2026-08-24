@@ -1,12 +1,13 @@
 # Database
 
-Postgres 17 on Supabase. Four migrations, run in order:
+Postgres 17 on Supabase. Five migrations, run in order:
 
 ```
 01_schema.sql     tables, enums, indexes
 02_functions.sql  helpers, RPCs, audit triggers
 03_policies.sql   row-level security
 04_storage.sql    private attachment bucket + policies
+05_cr01.sql       CR-01: stakeholder-raised tasks, created_at index
 ```
 
 ---
@@ -74,7 +75,13 @@ The executive request. **No status column, by design.**
 `next_followup_date` · `created_by` · `archived` · `archived_at` · `archived_by` ·
 `created_at` · `updated_at`
 
-Indexes: `archived`, `priority`, `expected_date`, `next_followup_date`
+Indexes: `archived`, `priority`, `expected_date`, `next_followup_date`,
+`created_at` (added by CR-01 for the created-date range filter)
+
+> `tasks` also has **two** foreign keys into `profiles` (`created_by`,
+> `archived_by`), so the creator embed must name its constraint too:
+> `profiles!tasks_created_by_fkey`. The creator's *role* is what marks a task as
+> self-created (CR-01 #6) — there is no stored flag to drift.
 
 ### `task_assignments`
 The critical table.

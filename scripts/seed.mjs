@@ -84,10 +84,14 @@ async function reset() {
 
 async function seedViews(ownerId) {
   const views = [
+    // CR-01 #4: the date filter is CREATED date now. Overdue / due-this-week
+    // are expressed with dueBucket, which is what the dashboard tiles use and
+    // is unaffected by the filter swap.
     ['Executive Priorities', { priority: 'high' }],
-    ['Overdue Tasks', { to: addDays(-1) }],
-    ['Due This Week', { from: addDays(0), to: addDays(7) }],
+    ['Overdue Tasks', { dueBucket: 'overdue' }],
+    ['Due This Week', { dueBucket: 'next7' }],
     ["Today's Follow-ups", { followupsDue: true }],
+    ['Raised This Month', { createdFrom: addDays(-30), createdTo: addDays(0) }],
   ];
   for (const [name, filters] of views) {
     await admin.from('saved_views').insert({ owner_id: ownerId, name, filters });

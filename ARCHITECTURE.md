@@ -29,9 +29,9 @@ src/
     Login.jsx              sign-in + first-login password (ported from Marketing)
     ui.jsx                 Avatar, chips, Metric, Empty, Skeleton, Modal, Field
     TaskDrawer.jsx         Overview / Progress / Comments / Attachments / Activity
-    CreateTaskModal.jsx    executive task creation
+    CreateTaskModal.jsx    task creation — executive (assign others) or self-raised
   views/
-    Dashboard.jsx          executive overview; metrics drill into the board
+    Dashboard.jsx          executive overview + "By stakeholder" tab (CR-01 #5)
     StakeholderHome.jsx    the stakeholder's simpler dashboard
     Board.jsx              Kanban, filters, movement controls
     Reopened.jsx           rework grouped by stakeholder
@@ -86,7 +86,7 @@ watching the board sees a stakeholder's move appear.
 
 There is no bespoke server. Postgres is the backend.
 
-### Three layers in `supabase/02_functions.sql`
+### Three layers in `supabase/02_functions.sql` (extended by `05_cr01.sql`)
 
 **1. Identity helpers** — `app_role()`, `is_executive()`, `owns_assignment()`,
 `can_see_task()`. `SECURITY DEFINER` so they can read `profiles` from inside an
@@ -98,9 +98,12 @@ write past RLS) and checks its own rule first:
 | Function | Rule enforced |
 |---|---|
 | `create_task` | executive only; title required |
+| `create_self_task` | stakeholder only; assigns the caller to themselves, and takes no assignee list |
+| `update_self_task` | the creator of a self-created task, that task only |
+| `archive_self_task` | the creator of a self-created task; archives, never destroys |
 | `advance_status` | executive → any status; stakeholder → one forward step on their own assignment |
-| `propose_promised_date` | own assignment only; refused once confirmed |
-| `confirm_promised_date` | executive only; a proposal must exist |
+| `propose_promised_date` | own assignment only; refused once confirmed, and refused on self-created tasks |
+| `confirm_promised_date` | executive only; a proposal must exist; refused on self-created tasks |
 | `reopen_assignment` | executive only; only from `done` |
 | `add_comment` | executive → any thread on the task; stakeholder → own thread only |
 | `add_stakeholder` / `remove_stakeholder` | executive only |

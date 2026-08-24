@@ -1,14 +1,16 @@
 import { useMemo, useState } from 'react';
-import { MessageSquare, Paperclip, Lock, KanbanSquare, ArrowRight, MoreHorizontal, Loader2 } from 'lucide-react';
+import { MessageSquare, Paperclip, Lock, KanbanSquare, ArrowRight, MoreHorizontal, Loader2, X, UserPlus } from 'lucide-react';
 import { STATUS, PRIORITY } from '../lib/styles.js';
 import { toCards } from '../lib/derive.js';
 import { dueMeta, isExecutiveRole } from '../lib/format.js';
-import { FORWARD_NEXT, allowedTargets, EMPTY_FILTERS } from '../lib/rules.js';
+import { FORWARD_NEXT, allowedTargets, EMPTY_FILTERS, isSelfCreated } from '../lib/rules.js';
 import { applyFilters, isFiltered, friendlyMoveError } from '../lib/filters.js';
 import { api } from '../lib/api.js';
 import { Avatar, PriorityBadge, DueChip, Empty } from '../components/ui.jsx';
 
 const BASE_COLS = ['todo', 'in_progress', 'under_review', 'done'];
+
+const DUE_BUCKET_LABEL = { overdue: 'Overdue', today: 'Due today', next7: 'Due in 7 days' };
 
 /* The cross-stakeholder executive board and the stakeholder's own board are the
    same component. They differ only in what the server returned: RLS gives a
@@ -110,6 +112,7 @@ export default function Board({ tasks, allTasks, role, me, onOpen, refresh, filt
 export function KCard({ task, a, me, role, isExec, busy, onOpen, onMove }) {
   const due = dueMeta(task.expected_date);
   const isMine = a.stakeholder_id === me?.id;
+  const selfCreated = isSelfCreated(task);
   const next = FORWARD_NEXT[a.status];
   // A stakeholder gets exactly one forward step; an executive gets the full menu.
   const canStep = !isExec && isMine && !!next;
@@ -143,6 +146,15 @@ export function KCard({ task, a, me, role, isExec, busy, onOpen, onMove }) {
         {a.promised_state === 'proposed' && (
           <span className="gx-chip" style={{ background: '#FFEFD6', color: '#9A5B00', cursor: 'default' }}>
             Awaiting confirmation
+          </span>
+        )}
+        {/* CR-01 #6: tells the EA at a glance which tasks she assigned and
+            which the stakeholder raised themselves. Only meaningful to an
+            executive — a stakeholder already knows what they raised. */}
+        {isExec && selfCreated && (
+          <span className="gx-chip" style={{ background: '#EFE7FF', color: '#6A3BD1', cursor: 'default' }}
+            title={`Raised by ${task.creator?.name} for themselves`}>
+            <UserPlus size={11} /> Self-created
           </span>
         )}
         {a.comment_count > 0 && <Meta icon={MessageSquare} n={a.comment_count} label="comments" />}
@@ -230,8 +242,13 @@ function FilterBar({ filters, setFilters, stakeholders }) {
       <Select label="Status" value={filters.status || ''} onChange={(v) => set('status', v)}
         options={[['', 'Any status'], ...Object.entries(STATUS).map(([k, v]) => [k, v.label])]} />
 
-      <DateBox label="Expected from" value={filters.from} onChange={(v) => setFilters({ ...filters, from: v })} />
-      <DateBox label="to" value={filters.to} onChange={(v) => setFilters({ ...filters, to: v })} />
+      {/* CR-01 #3/#4: the manual date range filters on when a task was RAISED.
+          Expected date is no longer a manual filter — the dashboard's overdue /
+          due-soon tiles still work off it, via filters.dueBucket. */}
+      <DateBox label="Created from" value={filters.createdFrom}
+        onChange={(v) => setFilters({ ...filters, createdFrom: v })} />
+      <DateBox label="to" value={filters.createdTo}
+        onChange={(v) => setFilters({ ...filters, createdTo: v })} />
 
       <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600,
         color: 'var(--ink-soft)', cursor: 'pointer' }}>
@@ -239,6 +256,20 @@ function FilterBar({ filters, setFilters, stakeholders }) {
           onChange={(e) => setFilters({ ...filters, followupsDue: e.target.checked })} />
         Follow-up due
       </label>
+
+      {/* Set by a dashboard tile rather than by a control here, so it is shown
+          as a removable chip — otherwise the board would silently be filtered
+          by something with no visible cause. */}
+      {filters.dueBucket && (
+        <span className="gx-chip" style={{ background: '#FDE2E2', color: '#C42424', gap: 6 }}>
+          {DUE_BUCKET_LABEL[filters.dueBucket]}
+          <button onClick={() => setFilters({ ...filters, dueBucket: null })}
+            aria-label={`Remove ${DUE_BUCKET_LABEL[filters.dueBucket]} filter`}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', display: 'flex', padding: 0 }}>
+            <X size={12} />
+          </button>
+        </span>
+      )}
 
       {dirty && (
         <button className="gx-btn gx-btn-ghost gx-focusable" style={{ marginLeft: 'auto', fontSize: 12.5 }}

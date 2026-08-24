@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import {
   FORWARD_NEXT, allowedTargets, canReopen, canConfirmPromised, canProposePromised,
   canCreateTask, canEditTask, canArchive, canViewAudit, isTaskComplete,
+  isSelfCreated, canEditOwnTask, createsForSelfOnly, EMPTY_FILTERS,
 } from '../src/lib/rules.js';
 import { applyFilters, isFiltered, friendlyMoveError } from '../src/lib/filters.js';
 import { metrics, byStakeholder, toCards } from '../src/lib/derive.js';
@@ -53,7 +54,7 @@ test('a stakeholder is offered exactly one next step, an executive every other s
 /* ── Permission predicates ───────────────────────────────────────────────── */
 
 test('executive-only capabilities are closed to stakeholders', () => {
-  for (const can of [canCreateTask, canEditTask, canArchive, canViewAudit]) {
+  for (const can of [canEditTask, canArchive, canViewAudit]) {
     assert.equal(can('ea'), true);
     assert.equal(can('ceo'), true);
     assert.equal(can('stakeholder'), false);
@@ -67,20 +68,24 @@ test('only an executive reopens, and only a done assignment', () => {
   assert.equal(canReopen('ceo', { status: 'under_review' }), false);
 });
 
+// A task the CEO's Office assigned, versus one a stakeholder raised themselves.
+const EA_TASK = { creator: { id: 'ceo-1', role: 'ceo' } };
+const SELF_TASK = { creator: { id: 'sh-1', role: 'stakeholder' }, created_by: 'sh-1' };
+
 test('promised dates: the stakeholder proposes, the executive confirms, then it locks', () => {
-  assert.equal(canProposePromised('stakeholder', { promised_state: 'none' }, true), true);
-  assert.equal(canProposePromised('stakeholder', { promised_state: 'proposed' }, true), true,
+  assert.equal(canProposePromised('stakeholder', { promised_state: 'none' }, true, EA_TASK), true);
+  assert.equal(canProposePromised('stakeholder', { promised_state: 'proposed' }, true, EA_TASK), true,
     'a proposal may be revised until it is confirmed');
-  assert.equal(canProposePromised('stakeholder', { promised_state: 'confirmed' }, true), false,
+  assert.equal(canProposePromised('stakeholder', { promised_state: 'confirmed' }, true, EA_TASK), false,
     'a confirmed date is locked');
-  assert.equal(canProposePromised('stakeholder', { promised_state: 'none' }, false), false,
+  assert.equal(canProposePromised('stakeholder', { promised_state: 'none' }, false, EA_TASK), false,
     'only the assignee proposes');
-  assert.equal(canProposePromised('ceo', { promised_state: 'none' }, true), false,
+  assert.equal(canProposePromised('ceo', { promised_state: 'none' }, true, EA_TASK), false,
     'an executive does not propose on someone’s behalf');
 
-  assert.equal(canConfirmPromised('ceo', { promised_state: 'proposed' }), true);
-  assert.equal(canConfirmPromised('stakeholder', { promised_state: 'proposed' }), false);
-  assert.equal(canConfirmPromised('ceo', { promised_state: 'none' }), false,
+  assert.equal(canConfirmPromised('ceo', { promised_state: 'proposed' }, EA_TASK), true);
+  assert.equal(canConfirmPromised('stakeholder', { promised_state: 'proposed' }, EA_TASK), false);
+  assert.equal(canConfirmPromised('ceo', { promised_state: 'none' }, EA_TASK), false,
     'there must be a proposal to confirm');
 });
 
@@ -99,7 +104,7 @@ const card = (over = {}) => ({
 
 test('an empty filter set matches everything and reads as not filtered', () => {
   const cards = [card(), card({ a: { status: 'done' } })];
-  const empty = { stakeholder: null, priority: null, status: null, from: '', to: '', followupsDue: false };
+  const empty = EMPTY_FILTERS;
   assert.equal(isFiltered(empty), false);
   assert.equal(applyFilters(cards, empty).length, 2);
 });
@@ -116,12 +121,64 @@ test('filters narrow by stakeholder, priority and status', () => {
     'filters combine with AND');
 });
 
-test('a date bound excludes tasks that have no expected date', () => {
-  const dated = card({ task: { expected_date: iso(5) } });
-  const undated = card({ task: { expected_date: null } });
-  const out = applyFilters([dated, undated], { from: iso(0), to: iso(10) });
+test('the date range filters on when a task was RAISED, not when it is due', () => {
+  // CR-01 #3/#4. Both are due far in the future; only creation date differs.
+  const old = card({ task: { created_at: `${iso(-40)}T09:00:00+05:30`, expected_date: iso(30) } });
+  const recent = card({ task: { created_at: `${iso(-2)}T09:00:00+05:30`, expected_date: iso(30) } });
+  const undated = card({ task: { created_at: null, expected_date: iso(30) } });
+
+  const out = applyFilters([old, recent, undated], { createdFrom: iso(-7), createdTo: iso(0) });
+  assert.equal(out.length, 1, 'only the recently raised task matches');
+  assert.equal(out[0].task.expected_date, iso(30), 'expected date is irrelevant to this filter');
+});
+
+test('a created-date bound uses the local calendar day, not the UTC slice', () => {
+  // 09:00 IST on day X is still day X-1 in UTC. Filtering "created on X"
+  // must keep it, or every morning's tasks vanish from their own day.
+  const morningIST = card({ task: { created_at: `${iso(0)}T09:00:00+05:30` } });
+  const out = applyFilters([morningIST], { createdFrom: iso(0), createdTo: iso(0) });
   assert.equal(out.length, 1);
-  assert.equal(out[0].task.expected_date, iso(5));
+});
+
+test('the dashboard due-date buckets survive the filter swap', () => {
+  // CR-4 changes the manual control only; these buckets still key off expected
+  // date, and are how the Overdue / Due today / Next 7 tiles drill through.
+  const overdue = card({ task: { expected_date: iso(-3) }, a: { status: 'todo' } });
+  const today = card({ task: { expected_date: iso(0) }, a: { status: 'todo' } });
+  const soon = card({ task: { expected_date: iso(4) }, a: { status: 'todo' } });
+  const lateDone = card({ task: { expected_date: iso(-9) }, a: { status: 'done' } });
+  const all = [overdue, today, soon, lateDone];
+
+  assert.equal(applyFilters(all, { dueBucket: 'overdue' }).length, 1, 'a completed late task is not overdue');
+  assert.equal(applyFilters(all, { dueBucket: 'today' }).length, 1);
+  assert.equal(applyFilters(all, { dueBucket: 'next7' }).length, 1);
+});
+
+test('CR-01 #6: everyone can raise a task, but only executives assign to others', () => {
+  assert.equal(canCreateTask('ea'), true);
+  assert.equal(canCreateTask('ceo'), true);
+  assert.equal(canCreateTask('stakeholder'), true, 'stakeholders may now raise their own');
+  assert.equal(createsForSelfOnly('stakeholder'), true);
+  assert.equal(createsForSelfOnly('ea'), false);
+  assert.equal(createsForSelfOnly('ceo'), false);
+});
+
+test('CR-01 #6: a self-created task has no propose/confirm handshake', () => {
+  assert.equal(isSelfCreated(SELF_TASK), true);
+  assert.equal(isSelfCreated(EA_TASK), false);
+  assert.equal(isSelfCreated(undefined), false, 'missing creator is not self-created');
+
+  assert.equal(canProposePromised('stakeholder', { promised_state: 'none' }, true, SELF_TASK), false,
+    'the creator already set the date');
+  assert.equal(canConfirmPromised('ceo', { promised_state: 'proposed' }, SELF_TASK), false,
+    'there is nothing for an executive to confirm');
+});
+
+test('CR-01 #6: a stakeholder may edit the task they raised, and only that one', () => {
+  assert.equal(canEditOwnTask('stakeholder', SELF_TASK, 'sh-1'), true);
+  assert.equal(canEditOwnTask('stakeholder', SELF_TASK, 'sh-2'), false, 'not someone else’s self-raised task');
+  assert.equal(canEditOwnTask('stakeholder', EA_TASK, 'sh-1'), false, 'not work assigned to them');
+  assert.equal(canEditOwnTask('ceo', SELF_TASK, 'sh-1'), false, 'executives use the executive path');
 });
 
 test('the follow-up filter keeps only follow-ups that are due or overdue', () => {

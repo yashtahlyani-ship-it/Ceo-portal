@@ -13,7 +13,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { anonClient, signIn, admin, DEMO_PASSWORD, freshTask, cleanup } from './helpers.mjs';
+import { anonClient, signIn, admin, DEMO_PASSWORD, freshTask, cleanup, profileIdFor } from './helpers.mjs';
 
 const EA = 'ea@demo.gyftr.net';
 const CEO = 'ceo@demo.gyftr.net';
@@ -419,6 +419,140 @@ test('saved views are private to their owner and closed to stakeholders', async 
   assert.ok(r.error, 'a stakeholder must not create saved views');
 
   await admin.from('saved_views').delete().eq('id', mine.id);
+});
+
+/* ── CR-01 #6: stakeholder-raised tasks ──────────────────────────────────── */
+
+test('a stakeholder can raise a task for themselves, and it lands only on their board', async () => {
+  const alice = await signIn(ALICE);
+  const { data: taskId, error } = await alice.rpc('create_self_task', {
+    p_title: 'CR6 self task', p_description: '', p_priority: 'high', p_expected_date: '2026-09-30',
+  });
+  assert.equal(error, null, 'a stakeholder may raise their own task');
+
+  const aliceId = await profileIdFor(ALICE);
+  const { data: asg } = await admin.from('task_assignments').select('stakeholder_id').eq('task_id', taskId);
+  assert.equal(asg.length, 1, 'exactly one assignment');
+  assert.equal(asg[0].stakeholder_id, aliceId, 'and it is the creator');
+
+  // Another stakeholder cannot see it at all.
+  const bob = await signIn(BOB);
+  const { data: hidden } = await bob.from('tasks').select('id').eq('id', taskId);
+  assert.deepEqual(hidden ?? [], [], 'invisible to other stakeholders');
+
+  // The CEO's Office sees it, and can tell it was self-raised.
+  const ceo = await signIn(CEO);
+  const { data: visible } = await ceo.from('tasks')
+    .select('id, creator:profiles!tasks_created_by_fkey(name,role)').eq('id', taskId).single();
+  assert.equal(visible.creator.role, 'stakeholder', 'the creator marks it as self-created');
+
+  await admin.from('tasks').delete().eq('id', taskId);
+});
+
+test('the self-created path cannot be used to assign work to anyone else', async () => {
+  // The RPC takes no assignee list at all, so the only way to test the boundary
+  // is to confirm the executive path stays closed to stakeholders.
+  const alice = await signIn(ALICE);
+  const bobId = await profileIdFor(BOB);
+
+  const viaCreate = await alice.rpc('create_task', {
+    p_title: 'should not exist', p_description: '', p_priority: 'low',
+    p_expected_date: null, p_followup_date: null, p_stakeholders: [bobId],
+  });
+  assert.ok(viaCreate.error, 'a stakeholder still cannot use create_task');
+
+  const { data: selfId } = await alice.rpc('create_self_task', {
+    p_title: 'CR6 assign probe', p_description: '', p_priority: 'low', p_expected_date: null,
+  });
+  // Nor bolt someone else onto a task they raised.
+  const viaAdd = await alice.rpc('add_stakeholder', { p_task_id: selfId, p_stakeholder_id: bobId });
+  assert.ok(viaAdd.error, 'a stakeholder cannot add assignees to their own task either');
+
+  await admin.from('tasks').delete().eq('id', selfId);
+});
+
+test('only the creator may edit or withdraw a self-raised task, and withdrawal archives', async () => {
+  const alice = await signIn(ALICE);
+  const { data: taskId } = await alice.rpc('create_self_task', {
+    p_title: 'CR6 edit probe', p_description: '', p_priority: 'medium', p_expected_date: null,
+  });
+
+  // Another stakeholder is refused both operations.
+  const bob = await signIn(BOB);
+  const bobEdit = await bob.rpc('update_self_task', {
+    p_task_id: taskId, p_title: 'hijacked', p_description: '', p_priority: 'high', p_expected_date: null,
+  });
+  assert.ok(bobEdit.error, 'not your task to edit');
+  const bobDrop = await bob.rpc('archive_self_task', { p_task_id: taskId });
+  assert.ok(bobDrop.error, 'not your task to withdraw');
+
+  // The creator can edit it.
+  const edit = await alice.rpc('update_self_task', {
+    p_task_id: taskId, p_title: 'CR6 edit probe v2', p_description: 'added later',
+    p_priority: 'low', p_expected_date: '2026-10-01',
+  });
+  assert.equal(edit.error, null, 'the creator may edit');
+  const { data: after } = await admin.from('tasks').select('title, description').eq('id', taskId).single();
+  assert.equal(after.title, 'CR6 edit probe v2');
+  assert.equal(after.description, 'added later', 'a summary can be added after the fact (CR-01 #1)');
+
+  // Withdrawing archives rather than destroys.
+  const drop = await alice.rpc('archive_self_task', { p_task_id: taskId });
+  assert.equal(drop.error, null, 'the creator may withdraw');
+  const { data: arch } = await admin.from('tasks').select('archived').eq('id', taskId).single();
+  assert.equal(arch.archived, true, 'archived, not destroyed');
+
+  await admin.from('tasks').delete().eq('id', taskId);
+});
+
+test('a stakeholder still cannot edit a task the CEO’s Office assigned to them', async () => {
+  const { taskId } = await freshTask({ assignees: [ALICE], title: 'assigned, not self-raised' });
+  const alice = await signIn(ALICE);
+
+  const r = await alice.rpc('update_self_task', {
+    p_task_id: taskId, p_title: 'hijacked', p_description: '', p_priority: 'high', p_expected_date: null,
+  });
+  assert.ok(r.error, 'update_self_task is scoped to tasks they raised');
+
+  const { data } = await admin.from('tasks').select('title').eq('id', taskId).single();
+  assert.equal(data.title, 'assigned, not self-raised', 'unchanged');
+});
+
+test('the promised-date handshake does not apply to a self-raised task', async () => {
+  const alice = await signIn(ALICE);
+  const { data: taskId } = await alice.rpc('create_self_task', {
+    p_title: 'CR6 promise probe', p_description: '', p_priority: 'low', p_expected_date: '2026-09-20',
+  });
+  const { data: asg } = await admin.from('task_assignments').select('id').eq('task_id', taskId).single();
+
+  const propose = await alice.rpc('propose_promised_date', { p_assignment_id: asg.id, p_date: '2026-09-25' });
+  assert.ok(propose.error, 'there is nobody to promise to');
+  assert.match(propose.error.message, /SELF_CREATED/);
+
+  const ceo = await signIn(CEO);
+  const confirm = await ceo.rpc('confirm_promised_date', { p_assignment_id: asg.id });
+  assert.ok(confirm.error, 'and nothing for an executive to confirm');
+
+  await admin.from('tasks').delete().eq('id', taskId);
+});
+
+test('an executive can still archive and edit a self-raised task', async () => {
+  const alice = await signIn(ALICE);
+  const { data: taskId } = await alice.rpc('create_self_task', {
+    p_title: 'CR6 exec authority', p_description: '', p_priority: 'low', p_expected_date: null,
+  });
+
+  const ceo = await signIn(CEO);
+  const { error: upErr } = await ceo.from('tasks').update({ priority: 'high' }).eq('id', taskId);
+  assert.equal(upErr, null);
+  const { error: arErr } = await ceo.rpc('archive_task', { p_task_id: taskId });
+  assert.equal(arErr, null, 'no special protection because a stakeholder raised it');
+
+  const { data } = await admin.from('tasks').select('priority, archived').eq('id', taskId).single();
+  assert.equal(data.priority, 'high');
+  assert.equal(data.archived, true);
+
+  await admin.from('tasks').delete().eq('id', taskId);
 });
 
 /* ── Stakeholder onboarding (Edge Function) ──────────────────────────────── */
