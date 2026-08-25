@@ -58,6 +58,30 @@ export async function profileIdFor(email) {
   return data.id;
 }
 
+/* Which accounts the tests run as.
+   Resolved FROM THE DATABASE rather than hard-coded, for two reasons: the real
+   roster is gitignored (this repo is public, so real addresses must never be
+   committed), and the demo roster can be swapped without editing tests.
+
+   Picks the EA, a CEO if one exists (falling back to the EA, since the two
+   roles have identical powers), and the first two stakeholders alphabetically
+   so runs are deterministic. */
+let _accounts = null;
+export async function accounts() {
+  if (_accounts) return _accounts;
+  const { data, error } = await admin.from('profiles')
+    .select('email, role').eq('active', true).order('email');
+  if (error) throw error;
+  const ea = data.find((p) => p.role === 'ea');
+  const ceo = data.find((p) => p.role === 'ceo') || ea;
+  const sh = data.filter((p) => p.role === 'stakeholder');
+  if (!ea || sh.length < 2) {
+    throw new Error('Need one EA and at least two stakeholders — run `npm run seed` first.');
+  }
+  _accounts = { EA: ea.email, CEO: ceo.email, ALICE: sh[0].email, BOB: sh[1].email };
+  return _accounts;
+}
+
 // Tasks created by tests, torn down in cleanup().
 const created = [];
 
@@ -68,7 +92,7 @@ const created = [];
  */
 export async function freshTask({ assignees = [], title = 'test fixture task', priority = 'medium',
   expectedDate = null, followupDate = null } = {}) {
-  const creator = await profileIdFor('ceo@demo.gyftr.net');
+  const creator = await profileIdFor((await accounts()).CEO);
   const { data: task, error } = await admin.from('tasks').insert({
     title, description: 'created by the integration tests', priority,
     expected_date: expectedDate, next_followup_date: followupDate, created_by: creator,

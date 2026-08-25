@@ -13,12 +13,11 @@
 // ════════════════════════════════════════════════════════════════════════════
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { anonClient, signIn, admin, DEMO_PASSWORD, freshTask, cleanup, profileIdFor } from './helpers.mjs';
+import { anonClient, signIn, admin, DEMO_PASSWORD, freshTask, cleanup, profileIdFor, accounts } from './helpers.mjs';
 
-const EA = 'ea@demo.gyftr.net';
-const CEO = 'ceo@demo.gyftr.net';
-const ALICE = 'neha@demo.gyftr.net';   // stakeholder A
-const BOB = 'saurabh@demo.gyftr.net';      // stakeholder B
+// Resolved from the database, not hard-coded — the real roster is gitignored,
+// so no live address may appear in this public repository. See helpers.mjs.
+const { EA, CEO, ALICE, BOB } = await accounts();
 
 test.after(cleanup);
 
@@ -597,7 +596,9 @@ test('the audit trail survives a delete and records what was destroyed', async (
 
   assert.equal(data.length, 1, 'the deletion is recorded');
   assert.ok(data[0].actor_id, 'with the actor');
-  assert.equal(data[0].actor_role, 'ceo', 'and their role');
+  // Whoever CEO resolves to — the roster may have a dedicated CEO or only an EA.
+  const { data: actor } = await admin.from('profiles').select('role').eq('email', CEO).single();
+  assert.equal(data[0].actor_role, actor.role, 'and their role');
 });
 
 test('a direct REST delete on tasks is still refused for everyone', async () => {
@@ -669,11 +670,16 @@ test('CR-02: notifications go to the right people and nobody else', async () => 
 
   const since = new Date().toISOString();
 
-  // Proposing notifies the executives — and not the proposer.
+  // Proposing notifies EVERY active executive — however many there are. The
+  // roster may hold an EA and a CEO, or just an EA (they have identical powers),
+  // so the expected count is derived rather than assumed.
+  const { count: execCount } = await admin.from('profiles')
+    .select('id', { count: 'exact', head: true }).in('role', ['ea', 'ceo']).eq('active', true);
+
   await alice.rpc('propose_promised_date', { p_assignment_id: id, p_date: '2026-09-19' });
   let { data } = await admin.from('notifications')
     .select('recipient_id, kind').eq('assignment_id', id).gte('created_at', since);
-  assert.equal(data.length, 2, 'both EA and CEO are told');
+  assert.equal(data.length, execCount, 'every active executive is told');
   assert.ok(data.every((n) => n.kind === 'promised_proposed'));
   assert.ok(data.every((n) => n.recipient_id !== aliceId), 'the proposer is not notified of their own action');
 
@@ -714,12 +720,12 @@ test('only an executive can add a stakeholder, and the new account must set a pa
   // A stakeholder calling the function directly is refused server-side.
   const alice = await signIn(ALICE);
   const refused = await alice.functions.invoke('create-stakeholder', {
-    body: { name: 'Should Not Exist', email: `reject-${Date.now()}@demo.gyftr.net` },
+    body: { name: 'Should Not Exist', email: `reject-${Date.now()}@example.invalid` },
   });
   assert.ok(refused.error || refused.data?.error, 'a stakeholder must not create accounts');
 
   // The CEO can.
-  const email = `probe-${Date.now()}@demo.gyftr.net`;
+  const email = `probe-${Date.now()}@example.invalid`;
   const ceo = await signIn(CEO);
   const { data, error } = await ceo.functions.invoke('create-stakeholder', {
     body: { name: 'Probe Head', email, title: 'Head of Probe' },

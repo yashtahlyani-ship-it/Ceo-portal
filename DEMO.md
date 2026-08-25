@@ -7,57 +7,48 @@
 
 ## Accounts
 
-Every account below signs in with:
+Every account signs in with:
 
 > **`Default@123`**
 
-> ⚠️ **MVP demo credential — change it before this tool carries real work.**
-> This repository is public and the deployment is publicly reachable, so this
-> password is effectively an open door to the demo data. It exists so the team
-> can evaluate the product without friction, nothing more. Before real use:
-> delete these `@demo.gyftr.net` accounts entirely and create real ones through
-> the app (each person then sets their own password at first sign-in).
+> ⚠️ **Shared password on a public URL — change this before the tool carries
+> real work.** These are now **real `@gyftr.com` addresses**, and one password
+> across the whole company means one leak exposes every account. It is set this
+> way so the team can evaluate without friction, nothing more.
+>
+> The fix is already built: configure SMTP in **Supabase → Authentication →
+> Emails**, then run `cd scripts && node onboard.mjs --apply`. Everyone gets an
+> individual email invite and sets their own password; no shared secret survives.
 
-The value lives in `DEMO_PASSWORD` in `.env` (gitignored) — that is what
-`npm run seed` applies to every account and what the integration tests sign in
-with. To change it everywhere: edit `.env`, then `npm run seed`.
+### Who is in the tool
 
-> **Names are real, credentials are throwaway.** The directory uses real names
-> and titles drawn from the sibling Gyftr portals (Marketing, Tech, Legal) so it
-> mirrors the actual organisation. Login emails are on `@demo.gyftr.net` — NOT
-> real corporate mailboxes — because every account shares one password. Remove
-> these accounts entirely before the tool carries real work.
+**19 people**, loaded from `scripts/roster.json` — which is **gitignored**,
+because this repository is public and a directory of working corporate addresses
+is what gets scraped for phishing. The roster is not reproduced here for the same
+reason: open the **Stakeholders** tab in the app to see it.
 
-| Role | Name | Email |
-|---|---|---|
-| **Executive Assistant** (Super Admin) | Anushka Mishra | `ea@demo.gyftr.net` |
-| **CEO** (Admin) | Chief Executive | `ceo@demo.gyftr.net` |
+| Role | Who |
+|---|---|
+| Executive Assistant (Super Admin) | Anushka Mishra — address is in `roster.json` / the Stakeholders tab |
+| CEO (Admin) | *none yet* — Anushka holds every executive permission, so the tool works without one. Add the CEO to `roster.json` when you have their address. |
+| Stakeholders | 18, across Marketing, Operations, CS, HR, Product, BA, IT, Legal, Finance and Business |
 
-Stakeholders (15) — login is `<first>.<last>@demo.gyftr.net` (single-name people
-use just the first name, e.g. `rajneesh@demo.gyftr.net`):
+Two notes on the roster as supplied:
 
-| Name | Title | Email |
-|---|---|---|
-| Neha | Head of Business | `neha@demo.gyftr.net` |
-| Saurabh | Head of Product | `saurabh@demo.gyftr.net` |
-| Rajneesh | Chief Technology Officer | `rajneesh@demo.gyftr.net` |
-| Anandita | Head of Technology Delivery | `anandita@demo.gyftr.net` |
-| Karan | Head of Quality | `karan@demo.gyftr.net` |
-| Deepankar Hemnani | Head of Content | `deepankar.hemnani@demo.gyftr.net` |
-| Ajay Kumar | Head of Creative | `ajay.kumar@demo.gyftr.net` |
-| Nitin | Head of Legal | `nitin@demo.gyftr.net` |
-| Nikhil | Head of Compliance | `nikhil@demo.gyftr.net` |
-| Nikunj Kanodia | Head of Finance | `nikunj.kanodia@demo.gyftr.net` |
-| Anirudh Motwani | Head of Strategy | `anirudh.motwani@demo.gyftr.net` |
-| Rahul Joshi | Head of Partnerships | `rahul.joshi@demo.gyftr.net` |
-| Priya Sharma | Head of Marketing | `priya.sharma@demo.gyftr.net` |
-| Kushagra | Head of Legal Operations | `kushagra@demo.gyftr.net` |
-| Pankaj Mehta | Head of Operations | `pankaj.mehta@demo.gyftr.net` |
+- **Nitin Kumar appeared twice** on the same address under both Legal and
+  Finance. Emails are unique, so the Finance row was dropped and Legal kept.
+- **`CS` and `BA` are left verbatim** as designations. `Mkt`, `Ops` and `Prod`
+  were expanded to Marketing / Operations / Product; the other two are ambiguous
+  and were not guessed. Edit them in the app if they should read differently.
 
-The seed creates ~64 tasks with a deliberate spread — overdue, due today, due
-this week, follow-ups due, reopened work, promised dates in all three states,
+The seed creates ~67 tasks across these people — overdue, due today, due this
+week, follow-ups due, reopened work, promised dates in all three states,
 multi-assignee tasks and comment threads — so the dashboard is alive on first
 load. `npm run seed` resets everything cleanly.
+
+> **Restoring the anonymous demo roster:** delete `scripts/roster.json` and
+> re-run the seed. It falls back to a built-in `@demo.gyftr.net` cast, so a fresh
+> clone still works without any real data.
 
 ---
 
@@ -68,7 +59,7 @@ This is the full lifecycle. It demonstrates the product's actual point:
 
 ### 1 · CEO creates a task
 
-Sign in as `ceo@demo.gyftr.net` → **Create task**.
+Sign in as the EA → **Create task**.
 
 | Field | Value |
 |---|---|
@@ -76,17 +67,17 @@ Sign in as `ceo@demo.gyftr.net` → **Create task**.
 | Description | Consolidated growth plan for the Q4 board review. |
 | Priority | High |
 | Expected date | 20 Sep 2026 |
-| Assign to | Priya Sharma (Marketing), Saurabh (Product), Neha (Business) |
+| Assign to | any three stakeholders — e.g. Marketing, Product and Business |
 
 The task appears on the Kanban as **three separate cards** — one per assignee.
 That is the multi-assignment model, visible immediately.
 
 ### 2 · Marketing sees only their own work
 
-Sign out, sign in as `priya.sharma@demo.gyftr.net`.
+Sign out, sign in as one of the assignees you picked.
 
 Notice what is *absent*: no Stakeholders, Proposed Date, Re-opened or Archive nav;
-no Create task button; no stakeholder filter. The board shows Priya's assignment
+no Create task button; no stakeholder filter. The board shows their assignment
 only — **not** Saurabh's or Neha's, and not their statuses or promised dates.
 
 Open the task → **Progress** → propose a **Promised date** of `18 Sep 2026`.
@@ -100,25 +91,25 @@ It reads *awaiting confirmation*. Nothing is locked yet.
 Back as the CEO, open the task → **Progress**.
 
 All three assignees are listed with independent statuses and promised dates.
-Click **Confirm & lock** on Priya's proposal.
+Click **Confirm & lock** on their proposal.
 
-It becomes `18 Sep 2026 · confirmed` with a lock. Priya can no longer change it —
+It becomes `18 Sep 2026 · confirmed` with a lock. they can no longer change it —
 attempting to raises *"This Promised Date has been confirmed and locked."*
 
 ### 4 · Marketing works the task forward
 
-As Priya, move the card one stage at a time:
+As that person, move the card one stage at a time:
 
 **To-Do → In Progress → Under Review → Done**
 
 Each step is a single button. There is no way to jump.
 
-Meanwhile Saurabh and Neha are untouched — the executive board shows the task
+Meanwhile the other two assignees are untouched — the executive board shows the task
 partially complete. **A task is only complete when every assignee is done.**
 
 ### 5 · CEO sends it back
 
-As the CEO, open Priya's assignment → **Reopen**.
+As the CEO, open their assignment → **Reopen**.
 
 Status becomes **Re-opened**. The Re-opened column appears on the board (it is
 not a permanent column — it exists only while something occupies it), and the
@@ -126,7 +117,7 @@ task now shows in the **Re-opened** view, grouped by stakeholder.
 
 ### 6 · Marketing reworks it
 
-As Priya, the card sits in Re-opened. The only move offered is **Move to In
+As that person, the card sits in Re-opened. The only move offered is **Move to In
 Progress** — rework rejoins the workflow, it does not shortcut to Done.
 
 Walk it forward again: **Re-opened → In Progress → Under Review → Done**.
@@ -139,7 +130,7 @@ The complete lifecycle, append-only, with actor, role and timestamp:
 
 ```
 task created
-stakeholder added          Priya Sharma
+stakeholder added          the assignee
 stakeholder added          Saurabh
 stakeholder added          Neha
 promised date proposed     → 18 Sep 2026
@@ -168,12 +159,9 @@ and the date is labelled **Due date**, not Expected date — the creator owns it
 so there is no propose-then-confirm step.
 
 Three already exist in the seed, so you can see this without creating one:
-
-| Task | Raised by |
-|---|---|
-| Draft my Q4 team plan | Neha (Business) |
-| Vendor renewal shortlist — *no summary* | Saurabh (Product) |
-| Refresh onboarding checklist | Rajneesh (CTO) |
+**Draft my Q4 team plan**, **Vendor renewal shortlist** (deliberately with no
+summary) and **Refresh onboarding checklist** — each raised by a different
+stakeholder. Search for them, or look for the *Self-created* tag on the board.
 
 Sign in as the **EA** and find one: it carries a **Self-created** tag on the card,
 and *"Self-created by [Name]"* in the drawer — so Anushka can tell at a glance

@@ -11,6 +11,9 @@
 //
 // This script RESETS first (clears demo data + @demo.gyftr.net accounts), so it
 // is deterministic and safe to re-run. Service role bypasses RLS.
+import { readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { admin, ensureUser } from './lib.mjs';
 
 // Read from .env (gitignored), never hard-coded — this repository is public and
@@ -33,9 +36,15 @@ const addDays = (n) => { const d = new Date(today); d.setDate(d.getDate() + n); 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const some = (arr, n) => [...arr].sort(() => Math.random() - 0.5).slice(0, n);
 
-// Real people from the Marketing / Tech / Legal portals, cast as CEO-Office
-// department heads. (name, title)
-const STAKEHOLDERS = [
+// ── Who to seed ──────────────────────────────────────────────────────────────
+// If scripts/roster.json exists, the REAL team is used — that file is gitignored
+// because this repository is public and a directory of working corporate
+// addresses is what gets scraped for phishing.
+//
+// Without it, the fallback roster below is used, so a fresh clone still produces
+// a working demo. The fallback names come from the sibling Gyftr portals and are
+// deliberately on @demo.gyftr.net, never real mailboxes.
+const FALLBACK = [
   ['Neha', 'Head of Business'],
   ['Saurabh', 'Head of Product'],
   ['Rajneesh', 'Chief Technology Officer'],
@@ -52,9 +61,19 @@ const STAKEHOLDERS = [
   ['Kushagra', 'Head of Legal Operations'],
   ['Pankaj Mehta', 'Head of Operations'],
 ].map(([name, title]) => ({
-  name, title,
+  name, title, role: 'stakeholder',
   email: name.toLowerCase().replace(/[^a-z]+/g, '.').replace(/^\.|\.$/g, '') + '@demo.gyftr.net',
 }));
+
+const ROSTER_PATH = join(dirname(fileURLToPath(import.meta.url)), 'roster.json');
+const USING_REAL = existsSync(ROSTER_PATH);
+const ROSTER = USING_REAL
+  ? JSON.parse(readFileSync(ROSTER_PATH, 'utf8')).people
+  : [
+      { name: 'Anushka Mishra', email: 'ea@demo.gyftr.net', title: "CEO's Office · Executive Assistant", role: 'ea' },
+      { name: 'Chief Executive', email: 'ceo@demo.gyftr.net', title: 'Chief Executive Officer', role: 'ceo' },
+      ...FALLBACK,
+    ];
 
 const TITLES = [
   'Prepare Q4 Growth Strategy', 'Finalize FY27 budget draft', 'Board deck for October review',
@@ -70,6 +89,8 @@ const STATUSES = ['todo', 'in_progress', 'under_review', 'done', 'reopened'];
 const PRIORITIES = ['high', 'medium', 'low'];
 
 // ── Reset: clear demo data + demo accounts so a re-run is deterministic ───────
+const SEEDED_EMAILS = new Set(ROSTER.map((p) => p.email.trim().toLowerCase()));
+
 async function reset() {
   console.log('Resetting existing demo data…');
   // saved_views is gone as of CR-02 #1. notifications cascade from tasks, but
@@ -83,7 +104,9 @@ async function reset() {
     const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
     if (error || !data || data.users.length === 0) break;
     for (const u of data.users) {
-      if (u.email?.endsWith('@demo.gyftr.net')) await admin.auth.admin.deleteUser(u.id);
+      // Only ever removes accounts this script created — matched against the
+      // roster in use, so a re-seed cannot delete someone onboarded separately.
+      if (SEEDED_EMAILS.has(u.email?.toLowerCase())) await admin.auth.admin.deleteUser(u.id);
     }
     if (data.users.length < 200) break;
     page++;
@@ -93,19 +116,27 @@ async function reset() {
 async function main() {
   await reset();
 
-  console.log('Creating executive accounts…');
-  // mustSetPassword:false — DEMO accounts must sign straight in with the shared
-  // password. ensureUser defaults it to TRUE (correct for real onboarding), so
-  // omitting it here strands every demo login on "Set a new password".
-  const eaId = await ensureUser({ email: 'ea@demo.gyftr.net', password: DEMO_PASSWORD, name: 'Anushka Mishra', role: 'ea', title: "CEO's Office · Executive Assistant", mustSetPassword: false });
-  const ceoId = await ensureUser({ email: 'ceo@demo.gyftr.net', password: DEMO_PASSWORD, name: 'Chief Executive', role: 'ceo', title: 'Chief Executive Officer', mustSetPassword: false });
-
-  console.log('Creating 15 stakeholders (real names, demo logins)…');
-  const sh = [];
-  for (const s of STAKEHOLDERS) {
-    const id = await ensureUser({ email: s.email, password: DEMO_PASSWORD, name: s.name, role: 'stakeholder', title: s.title, mustSetPassword: false });
-    sh.push({ ...s, id });
+  console.log(`Creating ${ROSTER.length} accounts from ${USING_REAL ? 'roster.json (REAL team)' : 'the built-in demo roster'}…`);
+  // mustSetPassword:false — every seeded account shares DEMO_PASSWORD and must
+  // sign straight in. ensureUser defaults it to TRUE (correct for real
+  // onboarding), so omitting it here strands every login on "Set a new password".
+  const ids = new Map();
+  for (const p of ROSTER) {
+    const id = await ensureUser({
+      email: p.email.trim().toLowerCase(), password: DEMO_PASSWORD,
+      name: p.name.trim(), role: p.role, title: (p.title || '').trim(),
+      mustSetPassword: false,
+    });
+    ids.set(p.email.trim().toLowerCase(), id);
   }
+  const execs = ROSTER.filter((p) => p.role === 'ea' || p.role === 'ceo')
+    .map((p) => ids.get(p.email.trim().toLowerCase()));
+  const sh = ROSTER.filter((p) => p.role === 'stakeholder')
+    .map((p) => ({ ...p, id: ids.get(p.email.trim().toLowerCase()) }));
+  // Tasks are raised by whoever holds an executive role. With only an EA on the
+  // roster, that is her — the tool does not require a separate CEO.
+  const eaId = execs[0];
+  const ceoId = execs[1] ?? execs[0];
 
   console.log('Creating ~64 tasks with assignments, promises, comments…');
   for (let i = 0; i < 64; i++) {
@@ -181,10 +212,15 @@ async function main() {
 }
 
 function printLogins() {
-  console.log('\n── Demo logins (password for all: the DEMO_PASSWORD in your .env) ──');
-  console.log('  EA  : ea@demo.gyftr.net   (Anushka Mishra · CEO\'s Office)');
-  console.log('  CEO : ceo@demo.gyftr.net  (Chief Executive)');
-  console.log('  Stakeholders: <first>.<last>@demo.gyftr.net — e.g. rajneesh@demo.gyftr.net, deepankar.hemnani@demo.gyftr.net');
+  console.log(`${String.fromCharCode(10)}── Logins (password for all: the DEMO_PASSWORD in your .env) ──`);
+  for (const p of ROSTER) {
+    const tag = p.role === 'stakeholder' ? '' : `  [${p.role.toUpperCase()}]`;
+    console.log(`  ${p.email.padEnd(32)} ${p.name} · ${p.title || '—'}${tag}`);
+  }
+  if (USING_REAL) {
+    console.log(`${String.fromCharCode(10)}  These are REAL addresses sharing one password, on a public URL.`);
+    console.log('  Configure SMTP and move to per-person invites before this holds real work.');
+  }
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });

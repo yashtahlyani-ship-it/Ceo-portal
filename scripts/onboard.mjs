@@ -25,6 +25,11 @@ import { admin } from './lib.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APPLY = process.argv.includes('--apply');
+// --shared-password uses DEMO_PASSWORD for everyone instead of a unique random
+// one each. NOT the default, and not what you want once this holds real work:
+// one password across the whole company means one leak exposes every account.
+// It exists because evaluation is easier when everyone can just get in.
+const SHARED = process.argv.includes('--shared-password');
 const ROSTER = join(here, 'roster.json');
 
 if (!existsSync(ROSTER)) {
@@ -73,8 +78,18 @@ for (const [i, p] of people.entries()) {
 }
 const eas = people.filter((p) => p.role === 'ea').length;
 const ceos = people.filter((p) => p.role === 'ceo').length;
+const warnings = [];
 if (eas !== 1) problems.push(`expected exactly one 'ea', found ${eas}`);
-if (ceos !== 1) problems.push(`expected exactly one 'ceo', found ${ceos}`);
+// Not an error: 'ea' and 'ceo' have identical powers in this tool, so a roster
+// with only an EA is workable. Worth saying out loud, though — nobody is
+// holding the CEO login.
+if (ceos === 0) warnings.push("no 'ceo' in the roster — the EA carries every executive permission, so this works, but add the CEO when you have their address");
+if (ceos > 1) problems.push(`expected at most one 'ceo', found ${ceos}`);
+
+if (warnings.length) {
+  console.warn(String.fromCharCode(10) + 'Notes:');
+  warnings.forEach((w) => console.warn('  ·', w));
+}
 
 if (problems.length) {
   console.error('\nRoster has problems — nothing was changed:\n');
@@ -110,7 +125,9 @@ async function main() {
     }
 
     const meta = { name, role: p.role, title };
-    const invite = await admin.auth.admin.inviteUserByEmail(email, { data: meta });
+    const invite = SHARED
+      ? { error: { message: 'shared-password mode: no invite sent' } }
+      : await admin.auth.admin.inviteUserByEmail(email, { data: meta });
     if (!invite.error && invite.data?.user) {
       await admin.from('profiles').upsert({
         id: invite.data.user.id, email, name, title, role: p.role, active: true,
@@ -119,10 +136,11 @@ async function main() {
       continue;
     }
 
-    const pw = tempPassword();
+    const pw = SHARED ? process.env.DEMO_PASSWORD : tempPassword();
+    if (SHARED && !pw) { console.error('--shared-password needs DEMO_PASSWORD in ../.env'); process.exit(1); }
     const created = await admin.auth.admin.createUser({
       email, password: pw, email_confirm: true,
-      user_metadata: { ...meta, must_set_password: true },
+      user_metadata: { ...meta, must_set_password: !SHARED },
     });
     if (created.error) {
       results.push({ email, name, outcome: `FAILED: ${created.error.message}` });
@@ -132,8 +150,9 @@ async function main() {
       id: created.data.user.id, email, name, title, role: p.role, active: true,
     });
     results.push({
-      email, name, outcome: 'temporary password (invite email failed)',
-      password: pw, reason: invite.error?.message,
+      email, name,
+      outcome: SHARED ? 'created with the shared password' : 'temporary password (invite email failed)',
+      password: SHARED ? null : pw, reason: invite.error?.message,
     });
   }
 
