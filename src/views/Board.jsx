@@ -6,7 +6,7 @@ import { dueMeta, isExecutiveRole } from '../lib/format.js';
 import { FORWARD_NEXT, allowedTargets, EMPTY_FILTERS, isSelfCreated } from '../lib/rules.js';
 import { applyFilters, isFiltered, friendlyMoveError } from '../lib/filters.js';
 import { api } from '../lib/api.js';
-import { Avatar, PriorityBadge, DueChip, Empty } from '../components/ui.jsx';
+import { Avatar, PriorityBadge, DueChip, Empty, Dropdown } from '../components/ui.jsx';
 
 const BASE_COLS = ['todo', 'in_progress', 'under_review', 'done'];
 
@@ -195,33 +195,21 @@ const Meta = ({ icon: Icon, n, label }) => (
    writes an audit event server-side, which is the point of keeping it explicit
    rather than a silent drag. */
 function MoveMenu({ a, role, onMove }) {
-  const [open, setOpen] = useState(false);
   const targets = allowedTargets(role, a);
   if (targets.length === 0) return null;
   return (
-    <span style={{ position: 'relative', display: 'inline-block' }}>
-      <button className="gx-btn gx-btn-line gx-focusable" onClick={() => setOpen((o) => !o)}
-        aria-expanded={open} aria-haspopup="menu"
-        style={{ padding: '5px 9px', fontSize: 11.5, fontWeight: 700, gap: 5 }}>
-        Move <MoreHorizontal size={13} />
-      </button>
-      {open && (
-        <>
-          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
-          <div className="gx-card gx-fade" role="menu"
-            style={{ position: 'absolute', zIndex: 50, marginTop: 6, padding: 6, width: 180,
-              boxShadow: '0 18px 50px -12px rgba(0,0,0,.3)' }}>
-            {targets.map((t) => (
-              <div key={t} role="menuitem" tabIndex={0} className="gx-menuitem"
-                onClick={() => { setOpen(false); onMove(a.id, t); }}
-                onKeyDown={(e) => { if (e.key === 'Enter') { setOpen(false); onMove(a.id, t); } }}>
-                <span className="gx-dot" style={{ background: STATUS[t].dot }} /> {STATUS[t].label}
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </span>
+    <Dropdown width={190} ariaLabel="Move this task to another status"
+      label={<>Move <MoreHorizontal size={13} /></>}>
+      {(close) => targets.map((t) => (
+        <div key={t} role="menuitem" tabIndex={0} className="gx-menuitem"
+          onClick={() => { close(); onMove(a.id, t); }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); close(); onMove(a.id, t); }
+          }}>
+          <span className="gx-dot" style={{ background: STATUS[t].dot }} /> {STATUS[t].label}
+        </div>
+      ))}
+    </Dropdown>
   );
 }
 
