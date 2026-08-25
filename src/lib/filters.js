@@ -1,5 +1,5 @@
 // Board filtering — pure functions, deliberately kept out of the JSX so they can
-// be unit-tested directly and reused by Saved Views.
+// be unit-tested directly.
 //
 // These filter only rows the SERVER already returned. They are a convenience for
 // the person looking at the board, never a security boundary: a stakeholder's

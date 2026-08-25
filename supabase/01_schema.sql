@@ -144,13 +144,8 @@ create index if not exists audit_task_idx    on audit_log(task_id);
 create index if not exists audit_created_idx  on audit_log(created_at desc);
 
 -- ── saved_views ─────────────────────────────────────────────────────────────
--- Executive-only custom filtered views. filters is opaque JSON the UI interprets.
-create table if not exists saved_views (
-  id          bigint generated always as identity primary key,
-  owner_id    uuid not null references profiles(id) on delete cascade,
-  name        text not null check (length(btrim(name)) > 0),
-  filters     jsonb not null default '{}'::jsonb,
-  created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now()
-);
-create index if not exists sv_owner_idx on saved_views(owner_id);
+-- WITHDRAWN by CR-02 #1 (see supabase/07_cr02.sql), which removed the saved-view
+-- feature and its custom-filter builder. The table is deliberately no longer
+-- created here: leaving it would mean re-applying this file resurrects a table
+-- the application has no code for. The board's own filter bar is unrelated and
+-- unaffected.

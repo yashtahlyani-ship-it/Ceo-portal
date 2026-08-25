@@ -59,9 +59,6 @@ create trigger trg_touch_assign before update on task_assignments
 drop trigger if exists trg_touch_profiles on profiles;
 create trigger trg_touch_profiles before update on profiles
   for each row execute function touch_updated_at();
-drop trigger if exists trg_touch_views on saved_views;
-create trigger trg_touch_views before update on saved_views
-  for each row execute function touch_updated_at();
 
 -- ── New auth user → profile safety net ───────────────────────────────────────
 -- Accounts are created by the admin script with role/name in user metadata.

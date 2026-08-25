@@ -29,15 +29,17 @@ src/
     Login.jsx              sign-in + first-login password (ported from Marketing)
     ui.jsx                 Avatar, chips, Metric, Empty, Skeleton, Modal, Field
     TaskDrawer.jsx         Overview / Progress / Comments / Attachments / Activity
+    NotificationBell.jsx   CR-02 in-app notifications (promised-date only)
     CreateTaskModal.jsx    task creation — executive (assign others) or self-raised
   views/
     Dashboard.jsx          executive overview + "By stakeholder" tab (CR-01 #5)
     StakeholderHome.jsx    the stakeholder's simpler dashboard
     Board.jsx              Kanban, filters, movement controls
     Reopened.jsx           rework grouped by stakeholder
+    Followups.jsx          tasks flagged to chase
     Archive.jsx            soft-deleted tasks, restorable
     Stakeholders.jsx       directory + add/deactivate
-    SavedViews.jsx         saved filter sets
+    ProposedDates.jsx      CR-02 promised-date decision queue (admin-only)
   hooks/useAuth.jsx        session, profile, first-login gate
   lib/
     supabase.js            client

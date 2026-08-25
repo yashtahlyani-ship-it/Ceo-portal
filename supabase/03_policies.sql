@@ -13,7 +13,6 @@ alter table task_assignments  enable row level security;
 alter table task_comments     enable row level security;
 alter table task_attachments  enable row level security;
 alter table audit_log         enable row level security;
-alter table saved_views       enable row level security;
 
 -- ── profiles ─────────────────────────────────────────────────────────────────
 -- A stakeholder sees themselves and the executives (needed to render comment
@@ -102,23 +101,7 @@ drop policy if exists audit_select on audit_log;
 create policy audit_select on audit_log for select to authenticated
   using ( is_executive() );
 
--- ── saved_views — an executive's own views ───────────────────────────────────
-drop policy if exists sv_select on saved_views;
-create policy sv_select on saved_views for select to authenticated
-  using ( is_executive() and owner_id = auth.uid() );
-
-drop policy if exists sv_insert on saved_views;
-create policy sv_insert on saved_views for insert to authenticated
-  with check ( is_executive() and owner_id = auth.uid() );
-
-drop policy if exists sv_update on saved_views;
-create policy sv_update on saved_views for update to authenticated
-  using ( is_executive() and owner_id = auth.uid() )
-  with check ( is_executive() and owner_id = auth.uid() );
-
-drop policy if exists sv_delete on saved_views;
-create policy sv_delete on saved_views for delete to authenticated
-  using ( is_executive() and owner_id = auth.uid() );
+-- saved_views was withdrawn by CR-02 #1; its policies went with the table.
 
 -- ── Grants: expose the RPCs to logged-in users (the rule lives inside each) ──
 grant execute on function

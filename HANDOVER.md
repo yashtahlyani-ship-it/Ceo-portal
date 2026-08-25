@@ -210,16 +210,26 @@ consolidating is a future decision, not a bug. The reasoning is in
 
 ## 9 · Traps that have already bitten this codebase
 
-Four real bugs, all fixed — but the shapes recur. Watch for them.
+Real bugs, all fixed — but the shapes recur. Watch for them.
 
 1. **Never build a date with `toISOString()`.** It is UTC. In IST it returns
    *yesterday* for most of the working day, so "due today" renders as overdue.
    Use local date parts (`getFullYear`/`getMonth`/`getDate`). The Marketing
    Portal carries the same warning.
-2. **`task_assignments` has two foreign keys into `profiles`** (`stakeholder_id`
-   and `promised_confirmed_by`). Any PostgREST embed must name the constraint —
-   `profiles!task_assignments_stakeholder_id_fkey` — or the query fails as
-   ambiguous.
+2. **Three tables now have TWO foreign keys into `profiles`.** Any PostgREST
+   embed against them must name the constraint or the query fails as ambiguous
+   — and this has broken something three separate times.
+
+   | Table | The two FKs | Embed as |
+   |---|---|---|
+   | `task_assignments` | `stakeholder_id`, `promised_confirmed_by` | `profiles!task_assignments_stakeholder_id_fkey` |
+   | `tasks` | `created_by`, `archived_by` | `profiles!tasks_created_by_fkey` |
+   | `notifications` | `recipient_id`, `actor_id` | `profiles!notifications_actor_id_fkey` |
+
+   Before adding a `profiles(...)` embed anywhere, check the target's FK count.
+   **And never swallow the error** — the third occurrence shipped looking like
+   "no notifications yet" because the poll had a bare `.catch(() => {})`. If a
+   background fetch can fail quietly, at minimum `console.warn` it.
 3. **Audit triggers must tolerate a vanishing parent.** Deleting a task cascades
    to its assignments, whose delete-trigger would otherwise write an audit row
    pointing at the already-deleted task and abort the whole delete.
@@ -235,7 +245,21 @@ Four real bugs, all fixed — but the shapes recur. Watch for them.
    **The integration tests cannot catch this class of bug** — they verify the
    server, not what the client does with the answer. Anything that gates the UI
    on server state needs a real browser pass.
-6. **Adding a nav item can push the user chip off-screen.** The header holds a
+6. **A withdrawn feature must leave the base migrations too.** CR-02 dropped
+   `saved_views` in `07`, but `01`–`03` still created it and its policies. Since
+   this file tells you migrations are safe to re-apply, re-running `01`–`03`
+   after `07` would have resurrected a table the app has no code for. The
+   definition is now gone from the base files, and re-applying all seven in
+   order was verified to leave it dropped. **When you withdraw something, remove
+   its DDL — do not just add a drop at the end.**
+7. **`position: fixed` is not fixed to the viewport if any ancestor has a
+   `transform`.** The Kanban cards carry one from the entrance animation and
+   from `:hover`, so an anchored menu was painted 485px off. Portal it to
+   `<body>` — and then remember that `<body>` is outside `.gx-root`, so the
+   design tokens will not resolve unless the portal content is wrapped in
+   `.gx-root`. Both traps are documented in `Dropdown` in `ui.jsx`; reuse that
+   component rather than rediscovering them.
+8. **Adding a nav item can push the user chip off-screen.** The header holds a
    logo, seven nav items, search, a primary button and the user chip — it does
    not fit at 1280 without help. `src/lib/styles.js` has breakpoints that shed
    gaps, then the user's name text, then the nav labels, in that order.
