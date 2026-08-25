@@ -55,9 +55,9 @@ npm run dev             # dev server
 npm run build           # production build
 npm run preview         # serve the production build locally
 npm run lint            # eslint  (expect 0 errors, ~9 warnings — see §8)
-npm test                # all 61 tests
+npm test                # all 64 tests
 npm run test:unit       # 23 pure-logic tests, no network
-npm run test:security   # 38 tests against the REAL database
+npm run test:security   # 41 tests against the REAL database
 npm run seed            # (re)create demo accounts + demo tasks
 ```
 
@@ -85,7 +85,7 @@ vercel env add VITE_SUPABASE_ANON_KEY production --force
 
 ## 5 · Running the database
 
-Six migrations, **run in this order** against a fresh project:
+Seven migrations, **run in this order** against a fresh project:
 
 ```
 supabase/01_schema.sql      tables, enums, indexes
@@ -94,6 +94,7 @@ supabase/03_policies.sql    row-level security
 supabase/04_storage.sql     private attachment bucket + policies
 supabase/05_cr01.sql        CR-01: stakeholder-raised tasks
 supabase/06_cr01_delete.sql CR-01: permanent delete
+supabase/07_cr02.sql        CR-02: promised-date approval, notifications
 ```
 
 They are idempotent (`create or replace`, `drop policy if exists`), so
@@ -114,10 +115,10 @@ to match — and let `npm run test:security` confirm they agree.
 
 ## 6 · How this codebase is tested (and why it's unusual)
 
-`npm test` → **61 tests, all passing.**
+`npm test` → **64 tests, all passing.**
 
 - **23 unit tests** (`tests/logic.test.mjs`) — pure functions, no network.
-- **38 integration tests** (`tests/security.test.mjs`) — against the **real**
+- **41 integration tests** (`tests/security.test.mjs`) — against the **real**
   Supabase project.
 
 The integration tests sign in as real users using the **anon key**, which is
@@ -139,8 +140,9 @@ net. Do not delete them to make a change pass.
 ## 7 · Routine operations
 
 ### Add a stakeholder
-In the app: **Stakeholders → Add Stakeholder**. A temporary password is shown
-once. They set their own at first sign-in.
+In the app: **Stakeholders → Invite Stakeholder** (Name, Email, Designation).
+With SMTP configured they get an email link to set their own password. Without
+it, the modal shows a temporary password to pass on instead — see §8.
 
 From the CLI:
 ```bash
@@ -160,9 +162,10 @@ cd scripts && npm run seed        # existing accounts are updated in place
 ```
 
 ### Reset the demo data
-`npm run seed` is safe to re-run. Accounts are reused; tasks are only seeded when
-the table is empty. To fully reset, clear `tasks`, `saved_views` and `audit_log`
-in Supabase first, then re-seed.
+`npm run seed` RESETS first — it clears demo data and the `@demo.gyftr.net`
+accounts, then rebuilds them, so it is deterministic. Note that it deletes and
+recreates the accounts, so any open browser session goes stale: sign out and
+back in afterwards rather than assuming something broke.
 
 ---
 
@@ -185,9 +188,18 @@ view is ever added, `npm i recharts` matches the Marketing Portal.)
 keyboard-accessible, unambiguous, and every move writes an audit event. Drag
 would be additive, not a replacement.
 
-**No notifications.** Explicitly out of scope for v1 — the dashboard is the
-monitoring mechanism. If you add them later, the natural seam is a trigger on
-`audit_log`, which already records every event a notification would announce.
+**Notifications are narrow on purpose.** CR-02 opened the door only for the
+three promised-date events; task edits, comments and column moves stay
+notification-free, and the dashboard is still the monitoring mechanism for
+everything else. The table is generic but the WRITERS are few — that is what
+stops it becoming a firehose. Widen it deliberately, not by reflex.
+
+**Email is not actually configured.** The invite flow (CR-02 #6) calls
+`inviteUserByEmail`, but this project has **no custom SMTP**, and Supabase's
+built-in sender is capped at ~2 emails/hour and only reliably reaches team
+members. So invites usually fall back to a temporary password, which the UI
+says plainly rather than claiming an email was sent. **Configure SMTP in
+Supabase → Authentication → Emails before onboarding real people.**
 
 **Two auth systems in the family.** Marketing and Legal use AWS Cognito; this app
 uses Supabase Auth. People maintain two passwords. Acceptable at ~17 users;

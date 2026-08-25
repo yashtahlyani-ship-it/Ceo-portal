@@ -1,6 +1,6 @@
 # Database
 
-Postgres 17 on Supabase. Six migrations, run in order:
+Postgres 17 on Supabase. Seven migrations, run in order:
 
 ```
 01_schema.sql     tables, enums, indexes
@@ -9,6 +9,7 @@ Postgres 17 on Supabase. Six migrations, run in order:
 04_storage.sql    private attachment bucket + policies
 05_cr01.sql       CR-01: stakeholder-raised tasks, created_at index
 06_cr01_delete.sql CR-01: permanent delete
+07_cr02.sql       CR-02: notifications, reject flow; drops saved_views
 ```
 
 ---
@@ -140,13 +141,24 @@ Actions recorded: `task_created`, `field_edited`, `status_changed`,
 `task_deleted` carries the title in `old_value`, written *before* the row is
 destroyed — otherwise the surviving audit row would point at nothing.
 
-### `saved_views`
-`id` · `owner_id` · `name` · `filters` (jsonb) · `created_at` · `updated_at`
+### `notifications`
+CR-02 #5. Deliberately narrow: only the three promised-date events write here.
 
-Index: `owner_id`
+`id` · `recipient_id` · `actor_id` · `task_id` · `assignment_id` ·
+`kind` (`promised_proposed` | `promised_confirmed` | `promised_rejected`) ·
+`body` (the rejection reason) · `read_at` · `created_at`
 
-`filters` stores exactly the board's own filter object, so "save this view" and
-"filter the board" are the same operation.
+Indexes: `(recipient_id, read_at)`, `created_at DESC`
+
+There is **no INSERT policy** — rows come only from `_notify()`, so a
+notification cannot be fabricated for someone else. `_notify()` also skips the
+actor, so nobody is told about their own action.
+
+> This is the **third** table with two foreign keys into `profiles`
+> (`recipient_id`, `actor_id`). Embeds must name the constraint —
+> `profiles!notifications_actor_id_fkey`.
+
+> `saved_views` was **dropped** by CR-02 #1, which withdrew the feature.
 
 ---
 
@@ -162,7 +174,7 @@ RLS is enabled on all seven tables. 19 policies.
 | `task_comments` | executive **or** own assignment | **none** | **none** | **none** |
 | `task_attachments` | `can_see_task(task_id)` | executive | — | executive |
 | `audit_log` | executive | **none** | **none** | **none** |
-| `saved_views` | executive **and** owner | same | same | same |
+| `notifications` | own rows only | **none** (written by `_notify()`) | own rows only | — |
 | `storage.objects` | `can_see_task(storage_task_id(name))` | executive | **none** | executive |
 
 Where a cell says **none**, no policy exists at all — the operation is impossible

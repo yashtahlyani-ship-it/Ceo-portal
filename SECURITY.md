@@ -161,7 +161,7 @@ Supabase is HTTPS-only. `vercel.json` sets `X-Content-Type-Options: nosniff`,
 
 ## Verification
 
-`npm run test:security` — **38 integration tests against the live database.**
+`npm run test:security` — **41 integration tests against the live database.**
 
 The methodology is the point: tests sign in as real users with the **anon key**,
 the same surface a browser has. The service role is used *only* to build fixtures

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  LayoutDashboard, KanbanSquare, RotateCcw, Users, Bookmark, Archive as ArchiveIcon,
-  Search, Plus, LogOut, Loader2, X, CalendarClock,
+  LayoutDashboard, KanbanSquare, RotateCcw, Users, Archive as ArchiveIcon,
+  Search, Plus, LogOut, Loader2, X, CalendarClock, CalendarCheck,
 } from 'lucide-react';
 import { useAuth } from './hooks/useAuth.jsx';
 import { api } from './lib/api.js';
@@ -16,8 +16,9 @@ import Board from './views/Board.jsx';
 import Reopened from './views/Reopened.jsx';
 import Archive from './views/Archive.jsx';
 import Stakeholders from './views/Stakeholders.jsx';
-import SavedViews from './views/SavedViews.jsx';
 import Followups from './views/Followups.jsx';
+import ProposedDates from './views/ProposedDates.jsx';
+import NotificationBell from './components/NotificationBell.jsx';
 import TaskDrawer from './components/TaskDrawer.jsx';
 import CreateTaskModal from './components/CreateTaskModal.jsx';
 
@@ -26,9 +27,9 @@ import CreateTaskModal from './components/CreateTaskModal.jsx';
 const EXEC_NAV = [
   ['overview',     'Overview',     LayoutDashboard],
   ['board',        'Kanban',       KanbanSquare],
+  ['proposed',     'Proposed Date', CalendarCheck],
   ['followups',    'Follow-ups',   CalendarClock],
   ['reopened',     'Re-opened',    RotateCcw],
-  ['views',        'Saved Views',  Bookmark],
   ['stakeholders', 'Stakeholders', Users],
   ['archive',      'Archive',      ArchiveIcon],
 ];
@@ -169,6 +170,8 @@ export default function App() {
           </button>
         )}
 
+        <NotificationBell onOpenTask={openTaskById} />
+
         <span style={{ width: 1, height: 24, background: 'var(--line)', flex: 'none' }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, position: 'relative', flex: 'none' }}>
           <Avatar name={profile.name} color={profile.color} size={30} />
@@ -205,11 +208,11 @@ export default function App() {
               {view === 'overview'     && (isExec ? <Dashboard {...shared} /> : <StakeholderHome {...shared} />)}
               {view === 'board'        && <Board {...shared} />}
               {view === 'followups'    && isExec && <Followups {...shared} />}
+              {view === 'proposed'     && isExec && <ProposedDates onOpen={openTaskById} refresh={refresh} />}
               {view === 'reopened'     && isExec && <Reopened {...shared} />}
               {view === 'archive'      && isExec && <Archive {...shared} />}
               {view === 'stakeholders' && isExec && <Stakeholders />}
-              {view === 'views'        && isExec && <SavedViews {...shared} />}
-            </>
+                </>
           )}
         </div>
       </main>

@@ -398,29 +398,6 @@ test('archive is a soft delete and is reversible; tasks are never hard-deleted',
   assert.equal(still.length, 1, 'the task row must survive a delete attempt');
 });
 
-/* ── Saved views ─────────────────────────────────────────────────────────── */
-
-test('saved views are private to their owner and closed to stakeholders', async () => {
-  const ea = await signIn(EA);
-  const { data: mine, error } = await ea.from('saved_views')
-    .insert({ owner_id: (await ea.auth.getUser()).data.user.id, name: 'probe view', filters: { priority: 'high' } })
-    .select().single();
-  assert.equal(error, null, 'an executive can save a view');
-
-  // The CEO cannot see the EA's view.
-  const ceo = await signIn(CEO);
-  const { data: theirs } = await ceo.from('saved_views').select('*').eq('id', mine.id);
-  assert.deepEqual(theirs ?? [], [], 'views are private to their owner');
-
-  // A stakeholder cannot create one at all.
-  const alice = await signIn(ALICE);
-  const { data: uid } = await alice.auth.getUser();
-  const r = await alice.from('saved_views').insert({ owner_id: uid.user.id, name: 'nope', filters: {} });
-  assert.ok(r.error, 'a stakeholder must not create saved views');
-
-  await admin.from('saved_views').delete().eq('id', mine.id);
-});
-
 /* ── CR-01 #6: stakeholder-raised tasks ──────────────────────────────────── */
 
 test('a stakeholder can raise a task for themselves, and it lands only on their board', async () => {
@@ -634,6 +611,101 @@ test('a direct REST delete on tasks is still refused for everyone', async () => 
   }
   const { data } = await admin.from('tasks').select('id').eq('id', taskId);
   assert.equal(data.length, 1, 'the row survives a direct delete from anyone');
+});
+
+/* ── CR-02: promised-date approval queue + notifications ─────────────────── */
+
+test('CR-02: rejecting a proposed date needs a reason, posts it, and resets to pending', async () => {
+  const { taskId, assignmentFor } = await freshTask({ assignees: [ALICE], title: 'CR2 reject flow' });
+  const id = assignmentFor(ALICE);
+  const alice = await signIn(ALICE);
+  const ceo = await signIn(CEO);
+
+  await alice.rpc('propose_promised_date', { p_assignment_id: id, p_date: '2026-09-18' });
+
+  // A stakeholder cannot decide their own proposal.
+  const theirs = await alice.rpc('reject_promised_date', { p_assignment_id: id, p_reason: 'no' });
+  assert.ok(theirs.error, 'rejecting is executive-only');
+
+  // The reason is enforced by the server, not merely marked required in a form.
+  const blank = await ceo.rpc('reject_promised_date', { p_assignment_id: id, p_reason: '   ' });
+  assert.ok(blank.error, 'a blank reason is refused');
+  assert.match(blank.error.message, /REASON_REQUIRED/);
+
+  const reason = 'The board review is on the 15th — we need it before then.';
+  const { error } = await ceo.rpc('reject_promised_date', { p_assignment_id: id, p_reason: reason });
+  assert.equal(error, null, 'the CEO may reject with a reason');
+
+  // Back to pending — not left showing a date that was turned down.
+  const { data: a } = await admin.from('task_assignments')
+    .select('promised_state, promised_proposed, promised_date').eq('id', id).single();
+  assert.equal(a.promised_state, 'none');
+  assert.equal(a.promised_proposed, null);
+  assert.equal(a.promised_date, null);
+
+  // The reason lands in the stakeholder's own comment thread, permanently.
+  const { data: comments } = await admin.from('task_comments').select('body').eq('assignment_id', id);
+  assert.equal(comments.length, 1);
+  assert.match(comments[0].body, /board review/);
+
+  // And it is audited with the date that was turned down.
+  const { data: aud } = await admin.from('audit_log')
+    .select('old_value').eq('task_id', taskId).eq('action', 'promised_rejected');
+  assert.equal(aud.length, 1);
+  assert.equal(aud[0].old_value, '2026-09-18');
+
+  // Deciding it twice is refused — it has left the queue.
+  const again = await ceo.rpc('reject_promised_date', { p_assignment_id: id, p_reason: 'again' });
+  assert.ok(again.error);
+  assert.match(again.error.message, /NOT_PROPOSED/);
+});
+
+test('CR-02: notifications go to the right people and nobody else', async () => {
+  const { assignmentFor } = await freshTask({ assignees: [ALICE], title: 'CR2 notify flow' });
+  const id = assignmentFor(ALICE);
+  const aliceId = await profileIdFor(ALICE);
+  const alice = await signIn(ALICE);
+  const ceo = await signIn(CEO);
+
+  const since = new Date().toISOString();
+
+  // Proposing notifies the executives — and not the proposer.
+  await alice.rpc('propose_promised_date', { p_assignment_id: id, p_date: '2026-09-19' });
+  let { data } = await admin.from('notifications')
+    .select('recipient_id, kind').eq('assignment_id', id).gte('created_at', since);
+  assert.equal(data.length, 2, 'both EA and CEO are told');
+  assert.ok(data.every((n) => n.kind === 'promised_proposed'));
+  assert.ok(data.every((n) => n.recipient_id !== aliceId), 'the proposer is not notified of their own action');
+
+  // Confirming notifies the stakeholder.
+  await ceo.rpc('confirm_promised_date', { p_assignment_id: id });
+  ({ data } = await admin.from('notifications')
+    .select('recipient_id, body').eq('assignment_id', id).eq('kind', 'promised_confirmed'));
+  assert.equal(data.length, 1);
+  assert.equal(data[0].recipient_id, aliceId);
+});
+
+test('CR-02: a stakeholder can read only their own notifications, and cannot forge one', async () => {
+  const { assignmentFor } = await freshTask({ assignees: [ALICE], title: 'CR2 notify isolation' });
+  const alice = await signIn(ALICE);
+  await alice.rpc('propose_promised_date', { p_assignment_id: assignmentFor(ALICE), p_date: '2026-09-20' });
+
+  // Those proposals notified the EA and CEO. Alice must not see them.
+  const { data: mine } = await alice.from('notifications').select('recipient_id');
+  const aliceId = await profileIdFor(ALICE);
+  assert.ok(mine.every((n) => n.recipient_id === aliceId), 'only their own rows come back');
+
+  // There is no INSERT policy, so a notification cannot be fabricated.
+  const bobId = await profileIdFor(BOB);
+  const forged = await alice.from('notifications')
+    .insert({ recipient_id: bobId, kind: 'promised_confirmed' });
+  assert.ok(forged.error, 'notifications cannot be written directly');
+});
+
+test('CR-02: Saved Views is gone — the table no longer exists', async () => {
+  const ceo = await signIn(CEO);
+  const { error } = await ceo.from('saved_views').select('id').limit(1);
+  assert.ok(error, 'the withdrawn feature leaves nothing queryable behind');
 });
 
 /* ── Stakeholder onboarding (Edge Function) ──────────────────────────────── */

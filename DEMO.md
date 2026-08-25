@@ -56,8 +56,8 @@ use just the first name, e.g. `rajneesh@demo.gyftr.net`):
 
 The seed creates ~64 tasks with a deliberate spread — overdue, due today, due
 this week, follow-ups due, reopened work, promised dates in all three states,
-multi-assignee tasks and comment threads — plus five starter saved views — so the
-dashboard is alive on first load. Re-running `npm run seed` resets cleanly.
+multi-assignee tasks and comment threads — so the dashboard is alive on first
+load. `npm run seed` resets everything cleanly.
 
 ---
 
@@ -85,7 +85,7 @@ That is the multi-assignment model, visible immediately.
 
 Sign out, sign in as `priya.sharma@demo.gyftr.net`.
 
-Notice what is *absent*: no Stakeholders, Saved Views, Re-opened or Archive nav;
+Notice what is *absent*: no Stakeholders, Proposed Date, Re-opened or Archive nav;
 no Create task button; no stakeholder filter. The board shows Priya's assignment
 only — **not** Saurabh's or Neha's, and not their statuses or promised dates.
 
@@ -208,6 +208,28 @@ open their whole board in place, including anything they raised themselves.
 
 ---
 
+## CR-02 additions (25 Aug 2026)
+
+**Proposed Date queue.** As the EA/CEO, open **Proposed Date** — every promised
+date awaiting a decision, longest wait first. Proposals later than the expected
+date are called out in amber, which is the case the queue exists to catch.
+
+*Confirm & lock* fixes the date. *Reject* requires a reason, and the button stays
+disabled until you write one — that rule is enforced by the database, not just
+the form. The reason is posted into the task's comment thread, so it is permanent
+and the stakeholder can see it. The item then leaves the queue and returns only
+when a new date is proposed.
+
+**Notifications.** The bell in the header, scoped to the promised-date workflow
+only — nothing for comments, edits or column moves. Reject a date as the EA, then
+sign in as that stakeholder: the bell shows an unread badge, and the item carries
+the rejection reason in quotes. Opening the panel marks them read.
+
+**Saved Views is gone.** Withdrawn by CR-02 #1, along with the underlying
+custom-filter builder. The board's own filter bar (from CR-01) is unaffected.
+
+---
+
 ## Other things worth showing
 
 **Dashboard drill-through.** On the executive Overview, every metric is a link.
@@ -215,14 +237,10 @@ Click **Overdue**, **Due today**, **Next 7 days** or **Follow-ups due** and the
 board opens pre-filtered. Click any row in **Stakeholder overview** to filter the
 board to that person.
 
-**Saved Views.** Five starter views ship with the seed — *Executive Priorities*,
-*Overdue Tasks*, *Due This Week*, *Today's Follow-ups*. They are private to their
-owner: the EA cannot see the CEO's views. Create, rename and delete are all
-inline.
-
-**Adding a stakeholder.** Stakeholders → *Add Stakeholder*. A temporary password
-is shown once. Sign in as that person and the app holds them on **Set a new
-password** before letting them anywhere near the board.
+**Inviting a stakeholder.** Stakeholders → *Invite Stakeholder* (Name, Email,
+Designation). With SMTP configured they get an email link; without it the modal
+hands you a temporary password instead and says why. Either way, signing in as
+that person holds them on **Set a new password** before the board.
 
 **Archive.** Archive a task from its drawer; find it under Archive; restore it.
 Nothing is ever destroyed — a `DELETE` against `tasks` is refused even for the CEO.
@@ -242,7 +260,7 @@ The interesting claims are not visual. To see them enforced at the server:
 npm run test:security
 ```
 
-38 tests that sign in as real users with the anon key — the same surface a
+41 tests that sign in as real users with the anon key — the same surface a
 browser has — and assert the database refuses. Skipping a stage, moving
 backward, touching a co-assignee's assignment, reading another person's comment
 thread, editing a comment, clearing the audit log, minting a signed URL for

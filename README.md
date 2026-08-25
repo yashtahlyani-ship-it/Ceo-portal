@@ -28,13 +28,15 @@ creative production.
 | **Immutable audit** | Every mutation is recorded append-only, readable by EA/CEO only |
 | **Archive & delete** | Archive is reversible and the default; permanent delete is available to EA/CEO on any task, and to a stakeholder on one they raised. Deletion is always recorded in the audit trail |
 | **Stakeholder-raised tasks** | A stakeholder can raise a task for themselves only; the CEO's Office sees it tagged as self-created |
-| **Saved views** | Executives save reusable filtered slices of the board |
 | **Stakeholder view** | A dashboard tab that browses workload person by person |
+| **Proposed Date queue** | One screen for the EA/CEO to confirm-and-lock or reject-with-reason every proposed date |
+| **Notifications** | In-app, scoped to the promised-date workflow only |
+| **Invite-based onboarding** | Name, email and designation; an email invite link, with a temporary-password fallback |
 | **Private attachments** | PDF/DOCX/XLSX/PNG/JPG in a private bucket, reachable only via short-lived signed URLs |
 
-Notifications are deliberately **out of scope for v1** — the dashboard is the
-monitoring mechanism. See [ARCHITECTURE.md](ARCHITECTURE.md) for the note on
-adding them later.
+Notifications exist only for the promised-date workflow (CR-02 #5) — not task
+edits, comments or column moves. The dashboard remains the monitoring mechanism
+for everything else.
 
 ---
 
@@ -84,6 +86,7 @@ supabase/03_policies.sql    row-level security
 supabase/04_storage.sql     private attachment bucket + its policies
 supabase/05_cr01.sql        CR-01: stakeholder-raised tasks (see CHANGELOG)
 supabase/06_cr01_delete.sql CR-01: permanent delete
+supabase/07_cr02.sql        CR-02: promised-date approval, notifications
 ```
 
 Then deploy the Edge Function that lets the EA/CEO add stakeholders from inside
@@ -119,7 +122,7 @@ npm run test:security   # permission/workflow tests against the real database
 npm run seed            # demo data
 ```
 
-`npm test` runs **61 tests**: 23 unit tests over the pure rules, and 38
+`npm test` runs **64 tests**: 23 unit tests over the pure rules, and 41
 integration tests that sign in as real users with the anon key and assert that
 the *server* refuses what it should. See [SECURITY.md](SECURITY.md).
 

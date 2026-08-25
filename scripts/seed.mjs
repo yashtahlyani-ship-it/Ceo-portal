@@ -72,7 +72,9 @@ const PRIORITIES = ['high', 'medium', 'low'];
 // ── Reset: clear demo data + demo accounts so a re-run is deterministic ───────
 async function reset() {
   console.log('Resetting existing demo data…');
-  for (const t of ['audit_log', 'saved_views', 'task_comments', 'task_attachments', 'task_assignments', 'tasks']) {
+  // saved_views is gone as of CR-02 #1. notifications cascade from tasks, but
+  // clearing them explicitly keeps a re-seed from leaving stale bell items.
+  for (const t of ['audit_log', 'notifications', 'task_comments', 'task_attachments', 'task_assignments', 'tasks']) {
     await admin.from(t).delete().gt('id', 0);
   }
   // Delete @demo.gyftr.net auth users (profiles cascade on delete).
@@ -85,22 +87,6 @@ async function reset() {
     }
     if (data.users.length < 200) break;
     page++;
-  }
-}
-
-async function seedViews(ownerId) {
-  const views = [
-    // CR-01 #4: the date filter is CREATED date now. Overdue / due-this-week
-    // are expressed with dueBucket, which is what the dashboard tiles use and
-    // is unaffected by the filter swap.
-    ['Executive Priorities', { priority: 'high' }],
-    ['Overdue Tasks', { dueBucket: 'overdue' }],
-    ['Due This Week', { dueBucket: 'next7' }],
-    ["Today's Follow-ups", { followupsDue: true }],
-    ['Raised This Month', { createdFrom: addDays(-30), createdTo: addDays(0) }],
-  ];
-  for (const [name, filters] of views) {
-    await admin.from('saved_views').insert({ owner_id: ownerId, name, filters });
   }
 }
 
@@ -120,10 +106,6 @@ async function main() {
     const id = await ensureUser({ email: s.email, password: DEMO_PASSWORD, name: s.name, role: 'stakeholder', title: s.title, mustSetPassword: false });
     sh.push({ ...s, id });
   }
-
-  console.log('Seeding saved views for EA and CEO…');
-  await seedViews(eaId);
-  await seedViews(ceoId);
 
   console.log('Creating ~64 tasks with assignments, promises, comments…');
   for (let i = 0; i < 64; i++) {

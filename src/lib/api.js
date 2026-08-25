@@ -13,6 +13,9 @@ const FK_STAKEHOLDER = 'task_assignments_stakeholder_id_fkey';
 // tasks likewise has two (created_by, archived_by). The creator's role is what
 // makes a task "self-created" (CR-01 #6), so it is embedded on every read.
 const FK_CREATOR = 'tasks_created_by_fkey';
+// notifications is the third table with two FKs into profiles (recipient_id,
+// actor_id). Same rule: name the constraint or PostgREST refuses the embed.
+const FK_NOTIF_ACTOR = 'notifications_actor_id_fkey';
 // Kept in step with the bucket's own file_size_limit (supabase/04_storage.sql).
 // Checked here only so the person gets a clear message before a 10 MB upload
 // travels the wire; the bucket enforces it regardless.
@@ -152,10 +155,31 @@ export const api = {
     if (error) throw error;
     await supabase.storage.from(BUCKET).remove([row.storage_path]);
   },
-  async savedViews() {
-    const { data, error } = await supabase.from('saved_views').select('*').order('name');
+  // CR-02 #3: the Proposed Date queue — every assignment awaiting an executive
+  // decision. RLS still applies, but only executives can reach this view at all.
+  async proposedDates() {
+    const { data, error } = await supabase
+      .from('task_assignments')
+      .select(`*,
+        stakeholder:profiles!${FK_STAKEHOLDER}(id,name,title,color),
+        task:tasks(id,title,priority,expected_date,archived)`)
+      .eq('promised_state', 'proposed')
+      .order('updated_at', { ascending: true });
+    if (error) throw error;
+    // Archived tasks are off every board, so they should not sit in a queue either.
+    return (data || []).filter((r) => r.task && !r.task.archived);
+  },
+
+  // ── CR-02 #5: notifications (promised-date workflow only) ──────────────────
+  async notifications({ limit = 30 } = {}) {
+    const { data, error } = await supabase
+      .from('notifications')
+      .select(`*, actor:profiles!${FK_NOTIF_ACTOR}(id,name), task:tasks(id,title)`)
+      .order('created_at', { ascending: false })
+      .limit(limit);
     if (error) throw error; return data || [];
   },
+  markNotificationsRead: (ids) => rpc('mark_notifications_read', { p_ids: ids ?? null }),
 
   // ── mutations (RPC) ─────────────────────────────────────────────────────────
   createTask: (t) => rpc('create_task', {
@@ -195,6 +219,9 @@ export const api = {
   advanceStatus: (assignmentId, target) => rpc('advance_status', { p_assignment_id: assignmentId, p_target: target }),
   proposePromised: (assignmentId, date) => rpc('propose_promised_date', { p_assignment_id: assignmentId, p_date: date }),
   confirmPromised: (assignmentId) => rpc('confirm_promised_date', { p_assignment_id: assignmentId }),
+  // CR-02 #4: the reason is mandatory server-side, not merely a required input.
+  rejectPromised: (assignmentId, reason) =>
+    rpc('reject_promised_date', { p_assignment_id: assignmentId, p_reason: reason }),
   reopen: (assignmentId) => rpc('reopen_assignment', { p_assignment_id: assignmentId }),
   addComment: (assignmentId, body) => rpc('add_comment', { p_assignment_id: assignmentId, p_body: body }),
   addStakeholder: (taskId, stakeholderId) => rpc('add_stakeholder', { p_task_id: taskId, p_stakeholder_id: stakeholderId }),
@@ -207,9 +234,4 @@ export const api = {
     const { data, error } = await supabase.from('tasks').update(fields).eq('id', taskId).select().single();
     if (error) throw error; return data;
   },
-  saveView: async (v) => {
-    const { data, error } = await supabase.from('saved_views').upsert(v).select().single();
-    if (error) throw error; return data;
-  },
-  deleteView: async (id) => { const { error } = await supabase.from('saved_views').delete().eq('id', id); if (error) throw error; },
 };

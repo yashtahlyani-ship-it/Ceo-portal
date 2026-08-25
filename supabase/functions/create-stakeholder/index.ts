@@ -1,11 +1,13 @@
 // Supabase Edge Function: create-stakeholder
-// Lets EA/CEO add a stakeholder from the app WITHOUT the service-role key ever
-// reaching the browser. The caller's JWT is verified and their role checked
-// server-side; only then does the service-role client create the account.
+//
+// CR-02 #6 turns onboarding into an INVITE flow: the EA/CEO enters Name, Email
+// and Designation, and the person receives an email link to set their own
+// password. This replaces the "no invite link" decision in PRD §9.
+//
+// It still exists so the service-role key never reaches a browser: the caller's
+// JWT is verified and their role checked server-side before anything is created.
 //
 // Deploy:  supabase functions deploy create-stakeholder
-// Secrets: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are injected automatically
-//          for deployed functions; no manual secret needed.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const cors = {
@@ -32,23 +34,50 @@ Deno.serve(async (req) => {
       return json({ error: 'Only the EA or CEO may add stakeholders' }, 403);
     }
 
-    // 2) Create the account with the service-role client.
     const body = await req.json();
-    const { name, email, title } = body || {};
+    const name = (body?.name ?? '').trim();
+    const email = (body?.email ?? '').trim().toLowerCase();
+    const title = (body?.title ?? '').trim();      // Designation (CR-02 #6)
+    const redirectTo = (body?.redirectTo ?? '').trim() || undefined;
     if (!name || !email) return json({ error: 'Name and email are required' }, 400);
 
     const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
-    const tempPassword = 'Gyftr@' + crypto.randomUUID().slice(0, 8) + '1!';
-    // must_set_password holds them on the "choose your own password" step at
-    // first sign-in (see hooks/useAuth.jsx). setPassword() clears it.
-    const { data, error } = await admin.auth.admin.createUser({
-      email, password: tempPassword, email_confirm: true,
-      user_metadata: { name, role: 'stakeholder', title, must_set_password: true },
-    });
-    if (error) return json({ error: error.message }, 400);
-    await admin.from('profiles').upsert({ id: data.user.id, email, name, title, role: 'stakeholder', active: true });
+    const meta = { name, role: 'stakeholder', title };
 
-    return json({ id: data.user.id, email, tempPassword }, 200);
+    // 2) Preferred path: email them an invite link so they set their own
+    //    password and no shared secret is ever transmitted.
+    const invite = await admin.auth.admin.inviteUserByEmail(email, {
+      data: meta,
+      redirectTo,
+    });
+
+    if (!invite.error && invite.data?.user) {
+      await admin.from('profiles').upsert({
+        id: invite.data.user.id, email, name, title, role: 'stakeholder', active: true,
+      });
+      return json({ id: invite.data.user.id, email, method: 'invite' }, 200);
+    }
+
+    // 3) Fallback. Sending mail can fail for reasons that have nothing to do
+    //    with this request — no SMTP configured, or the built-in service's very
+    //    low rate limit. Onboarding should not be blocked by that, so create the
+    //    account with a temporary password and hand it back for the EA to pass
+    //    on. The account is stamped must_set_password either way, so the person
+    //    still chooses their own password before reaching the board.
+    const reason = invite.error?.message ?? 'invite email could not be sent';
+    const tempPassword = 'Gyftr@' + crypto.randomUUID().slice(0, 8) + '1!';
+    const created = await admin.auth.admin.createUser({
+      email, password: tempPassword, email_confirm: true,
+      user_metadata: { ...meta, must_set_password: true },
+    });
+    if (created.error) return json({ error: created.error.message }, 400);
+
+    await admin.from('profiles').upsert({
+      id: created.data.user.id, email, name, title, role: 'stakeholder', active: true,
+    });
+    return json({
+      id: created.data.user.id, email, method: 'temp_password', tempPassword, reason,
+    }, 200);
   } catch (e) {
     return json({ error: String(e) }, 500);
   }

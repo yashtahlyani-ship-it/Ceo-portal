@@ -159,7 +159,7 @@ Two layers, with a deliberate split of responsibility.
 Transition rules, permission predicates, filters, dashboard derivations, date
 formatting, error copy.
 
-**Integration (`tests/security.test.mjs`, 38 tests)** — against the **real**
+**Integration (`tests/security.test.mjs`, 41 tests)** — against the **real**
 Supabase project, signing in as real users with the **anon key**: exactly the
 surface a browser has. The service role appears only to build fixtures and to
 independently verify what actually landed in the table — never to perform the
