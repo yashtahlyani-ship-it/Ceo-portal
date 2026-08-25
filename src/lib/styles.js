@@ -80,26 +80,37 @@ export const STYLES = `
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ─── Header width behaviour ───────────────────────────────────────────────
-   This is a desktop tool, but "desktop" spans 1280 → 1920. The header carries
-   a logo, seven nav items, search, a primary action and the user chip, which
-   does not fit at the low end. Rather than let the user chip slide off-screen,
-   the header sheds the least important things first, in this order:
+   This is a desktop tool, but "desktop" spans 1280 → 1920, and the header now
+   carries a logo, seven nav items, search, a primary action, a notification
+   bell and the user chip.
 
-     ≤1440  tighter gaps
-     ≤1400  the user's name and role text (avatar + menu remain)
-     ≤1340  nav labels, leaving icons (aria-label and title keep them named)
+   The base sizes above are deliberately tight so the whole thing fits a 1440
+   laptop with NOTHING hidden — that is the common case and it should look
+   complete. Below that it sheds, least important first:
 
-   Nav labels go before the search box on purpose: an icon-only nav item is
-   still reachable and still announced, whereas hiding search would remove a
-   capability outright.
+     ≤1430  the user's name and role (avatar + account menu remain)
+     ≤1300  nav labels, leaving icons (aria-label and title keep them named)
 
-   !important is needed because the header sets gap inline.
-   If you add another nav item, re-check this at 1280. */
-@media (max-width:1440px){ .gx-hdr{gap:10px !important} }
-@media (max-width:1400px){ .gx-hdr-user{display:none} }
-@media (max-width:1340px){
+   Hiding the role line alone was tried and dropped: that block's width is set
+   by the NAME, so removing the second line freed almost no horizontal space.
+   It is the whole chip text or nothing.
+
+   The search box is the only flexible element (flex: 0 1 230px, min 130), so it
+   absorbs the first ~100px of pressure before any of this triggers.
+
+   A LESSON FROM CR-02: these thresholds were previously tuned for a shorter nav
+   and no bell, which left a dead zone around 1440–1560 where nothing degraded
+   but nothing fitted either — the user chip was clipped off the right edge.
+   After changing anything in the header, re-measure across widths:
+
+     const h = document.querySelector('header');
+     h.scrollWidth - h.clientWidth   // must be 0 at 1280, 1366, 1440, 1536, 1920
+
+   !important is needed because the header sets gap inline. */
+@media (max-width:1430px){ .gx-hdr-user{display:none} }
+@media (max-width:1300px){
   .gx-navlabel{display:none}
-  .gx-hdr .gx-navitem{padding:8px 9px !important}
+  .gx-hdr .gx-navitem{padding:8px 8px !important}
 }
 `;
 

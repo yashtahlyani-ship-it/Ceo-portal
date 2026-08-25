@@ -259,15 +259,25 @@ Real bugs, all fixed — but the shapes recur. Watch for them.
    design tokens will not resolve unless the portal content is wrapped in
    `.gx-root`. Both traps are documented in `Dropdown` in `ui.jsx`; reuse that
    component rather than rediscovering them.
-8. **Adding a nav item can push the user chip off-screen.** The header holds a
-   logo, seven nav items, search, a primary button and the user chip — it does
-   not fit at 1280 without help. `src/lib/styles.js` has breakpoints that shed
-   gaps, then the user's name text, then the nav labels, in that order.
-   **After adding a nav item, check the header at 1280px**:
+8. **Changing the header creates a dead zone unless you re-measure.** It holds a
+   logo, seven nav items, search, a primary button, the notification bell and the
+   user chip. CR-02 added a long nav label and the bell, which pushed the natural
+   width past the old thresholds — so between roughly 1440 and 1560 nothing
+   degraded and nothing fitted, and the user chip was clipped off the right edge.
+   That is what "top panel khisak gya hai" looked like.
+
+   The base sizes are tuned so **everything shows at 1440 with nothing hidden**;
+   below that `src/lib/styles.js` sheds the user's name (≤1430) then the nav
+   labels (≤1300). Search absorbs the first ~100px on its own.
+
+   **Do not reason about this arithmetically — measure it.** After any header
+   change, at each of 1024 / 1152 / 1280 / 1366 / 1440 / 1536:
    ```js
    const h = document.querySelector('header');
-   h.scrollWidth - h.clientWidth   // must be 0
+   h.scrollWidth - h.clientWidth;                    // must be 0
+   h.lastElementChild.getBoundingClientRect().right <= innerWidth;  // must be true
    ```
+   Verified at all six after CR-02.
 
 ---
 

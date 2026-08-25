@@ -27,7 +27,7 @@ import CreateTaskModal from './components/CreateTaskModal.jsx';
 const EXEC_NAV = [
   ['overview',     'Overview',     LayoutDashboard],
   ['board',        'Kanban',       KanbanSquare],
-  ['proposed',     'Proposed Date', CalendarCheck],
+  ['proposed',     'Proposed',     CalendarCheck],
   ['followups',    'Follow-ups',   CalendarClock],
   ['reopened',     'Re-opened',    RotateCcw],
   ['stakeholders', 'Stakeholders', Users],
@@ -122,18 +122,18 @@ export default function App() {
 
       {/* ── Header — the Marketing Portal's exact shell ── */}
       <header className="gx-hdr" style={{ flex: 'none', height: 58, borderBottom: '1px solid var(--line)',
-        background: 'var(--surface)', display: 'flex', alignItems: 'center', gap: 18, padding: '0 24px' }}>
+        background: 'var(--surface)', display: 'flex', alignItems: 'center', gap: 12, padding: '0 18px' }}>
         <GyftrLogo fs={20} />
         <span style={{ width: 1, height: 24, background: 'var(--line)', margin: '0 2px' }} />
 
-        <nav style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <nav style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           {nav.map(([k, label, Icon]) => (
             <button key={k} className={`gx-navitem gx-focusable${view === k ? ' on' : ''}`}
               aria-current={view === k ? 'page' : undefined}
               // The accessible name stays the full label even when the text is
               // hidden at narrow widths, so the icon-only state is not mute.
               aria-label={label} title={label}
-              style={{ border: 'none', whiteSpace: 'nowrap', padding: '8px 11px',
+              style={{ border: 'none', whiteSpace: 'nowrap', padding: '8px 9px',
                 background: view === k ? undefined : 'transparent' }}
               onClick={() => setView(k)}>
               <Icon size={16} /> <span className="gx-navlabel">{label}</span>
