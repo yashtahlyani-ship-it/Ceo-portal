@@ -6,7 +6,8 @@
   "description": "Admin scripts (service-role): create stakeholders, seed demo data.",
   "scripts": {
     "seed": "node seed.mjs",
-    "create-stakeholder": "node create-stakeholder.mjs"
+    "create-stakeholder": "node create-stakeholder.mjs",
+    "onboard": "node onboard.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

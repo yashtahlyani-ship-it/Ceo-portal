@@ -1,0 +1,18 @@
+{
+  "_comment": [
+    "Copy this to scripts/roster.json and fill in the real people.",
+    "roster.json is GITIGNORED on purpose: this repository is public, and a real",
+    "corporate directory (names + working email addresses) is exactly what gets",
+    "scraped for phishing. Never commit the real file.",
+    "",
+    "role: 'ea' | 'ceo' | 'stakeholder'. Exactly one ea and one ceo are expected.",
+    "title: the person's Designation — shown beside their name when assigning",
+    "work and in the Stakeholder View (CR-01 / CR-02 #6).",
+    "email: must be unique. The schema enforces it, and auth lowercases it."
+  ],
+  "people": [
+    { "name": "Example Assistant", "email": "ea@example.com",   "title": "CEO's Office", "role": "ea" },
+    { "name": "Example Chief",     "email": "ceo@example.com",  "title": "Chief Executive Officer", "role": "ceo" },
+    { "name": "Example Head",      "email": "head@example.com", "title": "Marketing", "role": "stakeholder" }
+  ]
+}

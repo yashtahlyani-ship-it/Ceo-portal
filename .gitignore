@@ -11,3 +11,7 @@ dist-ssr
 
 .vercel
 .env*
+
+# The real team roster (names + working corporate emails).
+# Gitignored deliberately: this repository is PUBLIC.
+scripts/roster.json
