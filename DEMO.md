@@ -1,7 +1,7 @@
 # Demo
 
 **Live:** https://gyftr-ceo-portal.vercel.app
-**Local:** `npm run dev`
+**Local:** `npm run dev:frontend`
 
 ---
 

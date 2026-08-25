@@ -40,6 +40,29 @@ for everything else.
 
 ---
 
+## Repository layout
+
+Laid out like the Marketing (`../gyftr-portal`) and Legal (`../gyftr-legal`)
+portals, so anyone who has worked on those can navigate this without a tour.
+
+```
+frontend/          React + Vite app, its Dockerfile and CodeBuild buildspec
+supabase/          the data layer — schema, RLS, RPCs, Edge Function
+scripts/           admin scripts: seed, onboard, create-stakeholder
+tests/             unit + live integration tests
+infra/             first-time AWS provisioning
+.github/workflows/ CI
+docker-compose.yml single-host / local run
+```
+
+**There is no `backend/`.** The siblings ship a Node/Express API; this product's
+API, authorisation and storage live inside Postgres on Supabase. That is the one
+deliberate divergence in the family — see
+[PROJECT_PLAN.md](PROJECT_PLAN.md#stack-decision) for the reasoning and
+[DEPLOY.md](DEPLOY.md) for what it means on AWS.
+
+---
+
 ## Stack
 
 Chosen to match the existing internal ecosystem rather than by preference:
@@ -59,9 +82,16 @@ Chosen to match the existing internal ecosystem rather than by preference:
 ## Running locally
 
 ```bash
-npm install
-cp .env.example .env          # fill in from Supabase → Project Settings → API
-npm run dev                    # http://localhost:5173
+npm run install:all                            # frontend + scripts
+cp .env.example .env                           # from Supabase → Settings → API
+cp frontend/.env.example frontend/.env.local
+npm run dev:frontend                           # http://localhost:5173
+```
+
+Or the real container, exactly as it ships to AWS:
+
+```bash
+docker compose up --build                      # http://localhost:7868
 ```
 
 ### Environment variables
@@ -112,10 +142,10 @@ employee data. See [DEMO.md](DEMO.md) for logins and the walkthrough.
 ## Commands
 
 ```bash
-npm run dev             # dev server
-npm run build           # production build
-npm run preview         # serve the production build
+npm run dev:frontend    # dev server
+npm run build:frontend  # production build
 npm run lint            # eslint
+npm run docker:up       # build + run the container on :7868
 npm test                # all tests (unit + live integration)
 npm run test:unit       # pure logic only, no network
 npm run test:security   # permission/workflow tests against the real database
@@ -160,6 +190,8 @@ vercel deploy --prod
 
 | File | Contents |
 |---|---|
+| **[DEPLOY.md](DEPLOY.md)** | **Release runbook** — what AWS needs and how this differs from the siblings |
+| [infra/aws-setup.md](infra/aws-setup.md) | First-time AWS provisioning |
 | [CHANGELOG.md](CHANGELOG.md) | What changed and when — CR-01 onwards |
 | **[HANDOVER.md](HANDOVER.md)** | **Start here if you are new** — setup, operations, known state, traps |
 | [PROJECT_PLAN.md](PROJECT_PLAN.md) | What existed, what was built, decisions, risks, testing strategy |

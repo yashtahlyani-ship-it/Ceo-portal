@@ -1,0 +1,70 @@
+version: 0.2
+
+# CodeBuild buildspec — GyFTR CEO Office Portal Frontend
+# Project settings:
+#   - Environment: privileged = true (Docker)
+#   - Compute: ARM / Graviton (linux/arm64) to match BASE_IMAGE
+#   - Env vars set on the CodeBuild project:
+#       FRONTEND_IMAGE_REPO_NAME, FRONTEND_ECS_CONTAINER,
+#       VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
+#
+# VITE_* values are baked into the JS bundle at build time — they must be
+# passed as --build-arg here, not set on the running container.
+#
+# There is no backend buildspec for this product: the data layer is Supabase
+# (managed, external), so only this image is built and deployed. See DEPLOY.md.
+
+env:
+  shell: bash
+  variables:
+    BASE_IMAGE: 653380732738.dkr.ecr.ap-south-1.amazonaws.com/node-24.18.0-alpine3.24-arm:node-24.18.0-alpine3.24-arm
+
+phases:
+  pre_build:
+    commands:
+      - echo "Logging in to Amazon ECR..."
+      - export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 653380732738.dkr.ecr.ap-south-1.amazonaws.com
+      - IMAGE_TAG=v1.$CODEBUILD_BUILD_NUMBER
+      - export FRONTEND_IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$FRONTEND_IMAGE_REPO_NAME:$IMAGE_TAG
+      - echo "Using IMAGE_TAG=$IMAGE_TAG"
+      - echo "Frontend image -> $FRONTEND_IMAGE_URI"
+      - |
+        if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_ANON_KEY" ]; then
+          echo "ERROR: VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY not set — the app cannot reach its database and every page would fail to load"
+          exit 1
+        fi
+
+  build:
+    commands:
+      - echo "Build started on $(date)"
+      - echo "Building frontend image..."
+      - |
+        docker build -t $FRONTEND_IMAGE_URI \
+          --build-arg BASE_IMAGE=$BASE_IMAGE \
+          --build-arg VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
+          --build-arg VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY \
+          ./frontend
+      - |
+        # The anon key is public by design (security is Row-Level Security, not
+        # secrecy) but the SERVICE ROLE key is not, and it would grant full
+        # database access to every visitor. Fail the build rather than ship it.
+        if docker run --rm --entrypoint sh $FRONTEND_IMAGE_URI -c "grep -rl 'service_role' /app/dist" 2>/dev/null; then
+          echo "ERROR: a service-role key was compiled into the public bundle."
+          exit 1
+        fi
+        echo "No service-role key in the bundle."
+
+  post_build:
+    commands:
+      - echo "Build completed on $(date)"
+      - echo "Pushing frontend image..."
+      - docker push $FRONTEND_IMAGE_URI
+      - echo "Creating imagedefinitions.json..."
+      - printf '[{"name":"%s","imageUri":"%s"}]' "$FRONTEND_ECS_CONTAINER" "$FRONTEND_IMAGE_URI" > imagedefinitions.json
+      - cat imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json

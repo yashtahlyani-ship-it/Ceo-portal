@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build-frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+        env:
+          # Placeholders only — real values come from CodeBuild. This proves the
+          # bundle compiles and that the env actually reaches it (next step).
+          VITE_SUPABASE_URL: https://ciplaceholder.supabase.co
+          VITE_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+
+      - name: Supabase config must reach the bundle
+        working-directory: frontend
+        run: |
+          # Vite inlines VITE_* at build time. If that ever stops working the
+          # build still exits 0 and users get an app that cannot reach its
+          # database — a blank board with no obvious cause. Catch it here.
+          if ! grep -rq "ciplaceholder.supabase.co" dist/; then
+            echo "::error::VITE_SUPABASE_URL did not make it into the bundle."
+            echo "A build like this cannot load any data. Check the build args."
+            exit 1
+          fi
+          echo "Supabase config is present in the bundle."
+
+      - name: No credential may be compiled into the public bundle
+        working-directory: frontend
+        run: |
+          # The anon key is public by design; the service-role key is not, and
+          # would hand every visitor full database access.
+          if grep -rlE 'service_role|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN' dist/ ; then
+            echo "::error::A credential was found in the built bundle."
+            exit 1
+          fi
+          echo "No credentials found in dist/."
+
+  check-sql:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Migrations must be numbered and ordered
+        run: |
+          # They are applied in filename order; a gap or a duplicate prefix
+          # means somebody's database ends up in a different state to everyone
+          # else's. See DEPLOY.md.
+          ls supabase/*.sql
+          n=$(ls supabase/*.sql | wc -l)
+          u=$(ls supabase/*.sql | sed 's#.*/\([0-9]\+\)_.*#\1#' | sort -u | wc -l)
+          if [ "$n" -ne "$u" ]; then
+            echo "::error::duplicate migration number in supabase/"
+            exit 1
+          fi
+          echo "$n migrations, all uniquely numbered."
+
+  check-scripts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Syntax-check operational scripts and tests
+        run: |
+          for f in scripts/*.mjs tests/*.mjs; do node --check "$f"; done
+          echo "All scripts parse."
+
+      - name: roster.example.json must be valid JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('scripts/roster.example.json','utf8')); console.log('roster.example.json OK')"

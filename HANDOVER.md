@@ -26,13 +26,18 @@ deeper once you know where things are.
 ```bash
 git clone https://github.com/yashtahlyani-ship-it/Ceo-portal.git
 cd Ceo-portal
-npm install
+npm run install:all           # frontend + scripts
 
 cp .env.example .env          # fill in all four values (see below)
-cp .env .env.local            # the browser only needs the two VITE_ vars
+cp frontend/.env.example frontend/.env.local   # the two VITE_ vars only
 
-npm run dev                    # → http://localhost:5173
+npm run dev:frontend          # → http://localhost:5173
 ```
+
+The repository is laid out like the Marketing and Legal portals: the app lives
+in `frontend/`, the root holds orchestration and docs. The one difference is
+that those two have a `backend/` and this does not — its data layer is Supabase.
+See [DEPLOY.md](DEPLOY.md).
 
 ### The four environment values
 
@@ -51,10 +56,10 @@ npm run dev                    # → http://localhost:5173
 ## 3 · Commands
 
 ```bash
-npm run dev             # dev server
-npm run build           # production build
-npm run preview         # serve the production build locally
+npm run dev:frontend    # dev server
+npm run build:frontend  # production build
 npm run lint            # eslint  (expect 0 errors, ~9 warnings — see §8)
+npm run docker:up       # build + run the real container on :7868
 npm test                # all 64 tests
 npm run test:unit       # 23 pure-logic tests, no network
 npm run test:security   # 41 tests against the REAL database
@@ -107,7 +112,7 @@ supabase functions deploy create-stakeholder
 ```
 
 **Changing a business rule?** It lives in `supabase/02_functions.sql` (and
-`05_cr01.sql` for the stakeholder-raised-task rules), not in the React code. `src/lib/rules.js` is a *mirror* for deciding which buttons to show
+`05_cr01.sql` for the stakeholder-raised-task rules), not in the React code. `frontend/src/lib/rules.js` is a *mirror* for deciding which buttons to show
 and has no enforcement value. Change the SQL, re-apply it, then update the mirror
 to match — and let `npm run test:security` confirm they agree.
 
@@ -175,7 +180,7 @@ back in afterwards rather than assuming something broke.
 React-Compiler-era rules from `eslint-plugin-react-hooks` v7 (`set-state-in-effect`,
 `only-export-components`). The Marketing Portal violates the same rules 53 times.
 They are kept as *warnings, not disabled*, so the advice stays visible — see the
-comment in `eslint.config.js`. Fixing them is a deliberate cross-product change,
+comment in `frontend/eslint.config.js`. Fixing them is a deliberate cross-product change,
 not a drive-by.
 
 **Bundle is ~498 kB (139 kB gzipped).** It is React DOM, the Supabase client and
@@ -235,7 +240,7 @@ Real bugs, all fixed — but the shapes recur. Watch for them.
    pointing at the already-deleted task and abort the whole delete.
 4. **Do not wrap multiple controls in a `<label>`.** A label binds to exactly one
    control; wrapping three buttons made clicking the caption silently select the
-   first. Use `role="group"` + `aria-label` (see `Field` in `src/components/ui.jsx`).
+   first. Use `role="group"` + `aria-label` (see `Field` in `frontend/src/components/ui.jsx`).
 5. **A server-side flag is useless if the client never checks it.** The
    `create-stakeholder` function correctly stamped `must_set_password: true`,
    and an integration test asserted it — but `App.jsx` only rendered `<Login/>`
@@ -267,7 +272,7 @@ Real bugs, all fixed — but the shapes recur. Watch for them.
    That is what "top panel khisak gya hai" looked like.
 
    The base sizes are tuned so **everything shows at 1440 with nothing hidden**;
-   below that `src/lib/styles.js` sheds the user's name (≤1430) then the nav
+   below that `frontend/src/lib/styles.js` sheds the user's name (≤1430) then the nav
    labels (≤1300). Search absorbs the first ~100px on its own.
 
    **Do not reason about this arithmetically — measure it.** After any header

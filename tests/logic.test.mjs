@@ -10,10 +10,10 @@ import {
   canCreateTask, canEditTask, canArchive, canViewAudit, isTaskComplete,
   isSelfCreated, canEditOwnTask, canDeleteTask, canDeleteOwnTask,
   createsForSelfOnly, EMPTY_FILTERS,
-} from '../src/lib/rules.js';
-import { applyFilters, isFiltered, friendlyMoveError } from '../src/lib/filters.js';
-import { metrics, byStakeholder, toCards } from '../src/lib/derive.js';
-import { initials, dueMeta, isExecutiveRole, roleLabel } from '../src/lib/format.js';
+} from '../frontend/src/lib/rules.js';
+import { applyFilters, isFiltered, friendlyMoveError } from '../frontend/src/lib/filters.js';
+import { metrics, byStakeholder, toCards } from '../frontend/src/lib/derive.js';
+import { initials, dueMeta, isExecutiveRole, roleLabel } from '../frontend/src/lib/format.js';
 
 // Local calendar date, NOT toISOString() — that is UTC, and east of Greenwich it
 // returns yesterday for most of the working day. daysUntil() compares local

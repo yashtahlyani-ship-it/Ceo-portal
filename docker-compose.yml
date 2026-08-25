@@ -1,0 +1,45 @@
+# GyFTR CEO Office Portal — local / single-host orchestration
+#
+# Usage:
+#   cp .env.example .env   # fill in values
+#   docker compose up --build
+#
+# Local compose: frontend http://localhost:7868
+#
+# Only ONE service, unlike the Marketing and Legal portals. Those ship a
+# frontend and a Node/Express backend; this product's data layer is Supabase
+# (managed Postgres + Auth + Storage + Edge Functions), so there is no second
+# container to run. See DEPLOY.md for what that means on AWS.
+#
+# Port map across the family (keep these distinct so they can share a host):
+#   Marketing  frontend 7867  backend 7878
+#   Legal      frontend 7979  backend 7978
+#   CEO Office frontend 7868  backend — none
+
+services:
+  frontend:
+    platform: linux/arm64
+    build:
+      context: ./frontend
+      args:
+        # Vite inlines these at BUILD time. Setting them as `environment:`
+        # below would do nothing — the bundle is already compiled by then.
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+    image: gyftr-ceo-portal-frontend
+    container_name: gyftr-ceo-portal-frontend
+    ports:
+      - "7868:7868"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:7868/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

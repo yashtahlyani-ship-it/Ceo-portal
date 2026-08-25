@@ -9,7 +9,7 @@ assumed.
 
 - **Frontend:** React 19, Vite 8, `lucide-react`, `recharts`. ~4,200 lines.
 - **Backend:** Node/Express (`backend/`) with AWS Cognito for auth, Postgres via `db.js`.
-- **Design system:** a single exported template string, `src/lib/styles.js`,
+- **Design system:** a single exported template string, `frontend/src/lib/styles.js`,
   defining CSS custom properties and a `gx-` class vocabulary. No Tailwind, no
   component library, no CSS modules.
 - **Layout:** a **58px top header** — logo, divider, inline nav items, a primary
@@ -34,7 +34,7 @@ assumed.
 | Danger | `#FDE2E2` / `#C42424` |
 | Motion | `gxf` fade-up 0.4s, `gxd` drawer slide 0.32s, `cubic-bezier(.2,.7,.2,1)` |
 
-Everything above is reused verbatim. `src/lib/styles.js` in this project is the
+Everything above is reused verbatim. `frontend/src/lib/styles.js` in this project is the
 Marketing Portal's file plus a clearly-marked additions block that introduces
 Kanban column/card classes **built only from existing tokens** — no new hues, no
 new fonts, no gradients, no glassmorphism.
@@ -182,7 +182,7 @@ bucket privacy, and stakeholder onboarding.
 | **Two auth systems in the ecosystem** | Cognito (Marketing/Legal) and Supabase Auth (here). Users maintain two passwords. Acceptable at ~17 users; consolidating is a future call, not a v1 one. |
 | **No drag-and-drop on the Kanban** | Movement is via explicit buttons and menus — keyboard-accessible, unambiguous, and every move is audited. Drag would be additive, not a replacement. |
 | **Bundle is ~498 kB (139 kB gzipped)** | React DOM, the Supabase client and lucide icons. No obvious fat to cut. (An earlier revision of this row blamed Recharts — that was wrong; it was never imported, so Vite tree-shook it. The dependency has since been dropped.) |
-| **9 lint warnings** | React-Compiler-era rules from `react-hooks` v7 that the Marketing Portal also violates (53 occurrences there). Kept as warnings, not disabled — see the note in `eslint.config.js`. Fixing them is a cross-product change. |
+| **9 lint warnings** | React-Compiler-era rules from `react-hooks` v7 that the Marketing Portal also violates (53 occurrences there). Kept as warnings, not disabled — see the note in `frontend/eslint.config.js`. Fixing them is a cross-product change. |
 | **Attachment orphans** | If the metadata insert fails after an upload, the object is removed. If *that* cleanup fails, an unreferenced object remains — invisible to the app, but it consumes storage. |
 | **No notifications** | Explicitly out of scope. The dashboard is the monitoring mechanism. |
 

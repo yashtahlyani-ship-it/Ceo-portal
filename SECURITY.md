@@ -2,7 +2,7 @@
 
 ## Principle
 
-**The client is never the authority.** `src/lib/rules.js` exists so the right
+**The client is never the authority.** `frontend/src/lib/rules.js` exists so the right
 buttons appear; it has no enforcement value. Every rule it describes is
 re-checked by Postgres. If the two ever disagree, the server wins and the person
 sees a translated message.
