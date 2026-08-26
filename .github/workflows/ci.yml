@@ -35,55 +35,39 @@ jobs:
         env:
           # Placeholders only — real values come from CodeBuild. This proves the
           # bundle compiles and that the env actually reaches it (next step).
-          VITE_SUPABASE_URL: https://ciplaceholder.supabase.co
-          VITE_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          VITE_API_URL: https://ci-placeholder-api.invalid
+          VITE_COGNITO_USER_POOL_ID: ap-south-1_CIPLACEHOLD
+          VITE_COGNITO_CLIENT_ID: ciplaceholderclientid
 
-      - name: Supabase config must reach the bundle
+      - name: Build-time config must reach the bundle
         working-directory: frontend
         run: |
           # Vite inlines VITE_* at build time. If that ever stops working the
-          # build still exits 0 and users get an app that cannot reach its
-          # database — a blank board with no obvious cause. Catch it here.
-          if ! grep -rq "ciplaceholder.supabase.co" dist/; then
-            echo "::error::VITE_SUPABASE_URL did not make it into the bundle."
-            echo "A build like this cannot load any data. Check the build args."
+          # build still exits 0 and users get an app that cannot reach its API
+          # or sign anybody in — a blank screen with no obvious cause.
+          missing=""
+          grep -rq "ci-placeholder-api.invalid" dist/ || missing="$missing VITE_API_URL"
+          grep -rq "ap-south-1_CIPLACEHOLD"     dist/ || missing="$missing VITE_COGNITO_USER_POOL_ID"
+          grep -rq "ciplaceholderclientid"      dist/ || missing="$missing VITE_COGNITO_CLIENT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::these did not make it into the bundle:$missing"
             exit 1
           fi
-          echo "Supabase config is present in the bundle."
+          echo "All build-time config is present in the bundle."
 
       - name: No credential may be compiled into the public bundle
         working-directory: frontend
         run: |
-          # The anon key is public by design; the service-role key is not, and
-          # would hand every visitor full database access.
-          if grep -rlE 'service_role|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN' dist/ ; then
+          # The API URL and Cognito pool ids are public identifiers by design.
+          # A client SECRET, an AWS key or a database password is not, and any
+          # of them would be catastrophic in a file every visitor downloads.
+          if grep -rlE 'AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{20,}|CLIENT_SECRET|DB_PASSWORD|-----BEGIN' dist/ ; then
             echo "::error::A credential was found in the built bundle."
             exit 1
           fi
           echo "No credentials found in dist/."
 
-  check-sql:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Migrations must be numbered and ordered
-        run: |
-          # They are applied in filename order; a gap or a duplicate prefix
-          # means somebody's database ends up in a different state to everyone
-          # else's. See DEPLOY.md.
-          ls supabase/*.sql
-          n=$(ls supabase/*.sql | wc -l)
-          u=$(ls supabase/*.sql | sed 's#.*/\([0-9]\+\)_.*#\1#' | sort -u | wc -l)
-          if [ "$n" -ne "$u" ]; then
-            echo "::error::duplicate migration number in supabase/"
-            exit 1
-          fi
-          echo "$n migrations, all uniquely numbered."
-
-  check-scripts:
+  check-backend:
     runs-on: ubuntu-latest
 
     steps:
@@ -95,10 +79,81 @@ jobs:
         with:
           node-version: 20
 
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm install
+
+      - name: Syntax-check the API
+        working-directory: backend
+        run: |
+          for f in $(find . -name '*.js' -not -path './node_modules/*'); do node --check "$f"; done
+          echo "All backend files parse."
+
+      - name: Migrations must be numbered and ordered
+        run: |
+          # They are applied in filename order by backend/db.js on every boot;
+          # a duplicate prefix means two databases end up in different states
+          # depending on which file the filesystem returned first.
+          ls backend/sql/*.sql
+          n=$(ls backend/sql/*.sql | wc -l)
+          u=$(ls backend/sql/*.sql | sed 's#.*/\([0-9]\+\)_.*#\1#' | sort -u | wc -l)
+          if [ "$n" -ne "$u" ]; then
+            echo "::error::duplicate migration number in backend/sql/"
+            exit 1
+          fi
+          echo "$n migrations, all uniquely numbered."
+
+      - name: Migrations must apply cleanly, and twice
+        env:
+          PGPASSWORD: ciplaceholder
+        run: |
+          # Applying them once proves they are valid. Applying them AGAINST THE
+          # SAME DATABASE proves they are idempotent, which DEPLOY.md promises
+          # and backend/db.js relies on — it re-applies every file on every
+          # boot, so a non-idempotent migration would break every restart
+          # rather than failing once at deploy time.
+          docker run -d --name ci-pg -e POSTGRES_PASSWORD=ciplaceholder \
+            -e POSTGRES_DB=gyftr_ceo -e POSTGRES_USER=gyftr_admin \
+            -p 5432:5432 postgres:16-alpine
+          for i in $(seq 1 30); do
+            docker exec ci-pg pg_isready -U gyftr_admin -d gyftr_ceo && break
+            sleep 1
+          done
+          for pass in 1 2; do
+            echo "── migration pass $pass ──"
+            for f in backend/sql/*.sql; do
+              echo "  $f"
+              docker exec -i -e PGPASSWORD=$PGPASSWORD ci-pg \
+                psql -v ON_ERROR_STOP=1 -U gyftr_admin -d gyftr_ceo < "$f"
+            done
+          done
+          echo "Migrations apply cleanly and are idempotent."
+
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install
+        run: npm install
+
       - name: Syntax-check operational scripts and tests
         run: |
           for f in scripts/*.mjs tests/*.mjs; do node --check "$f"; done
           echo "All scripts parse."
+
+      - name: Unit and route-safety tests
+        # These need no database. The route-safety suite is the one that fails
+        # if a handler reaches for the RLS-bypassing query() instead of
+        # withUser() — see tests/routes.test.mjs for why that matters.
+        run: npm run test:unit
 
       - name: roster.example.json must be valid JSON
         run: node -e "JSON.parse(require('fs').readFileSync('scripts/roster.example.json','utf8')); console.log('roster.example.json OK')"

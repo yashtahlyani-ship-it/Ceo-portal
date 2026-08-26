@@ -1,6 +1,14 @@
 # Database
 
-Postgres 17 on Supabase. Seven migrations, run in order:
+PostgreSQL 16 on RDS. Eight migrations, applied by `backend/db.js` in filename
+order on every boot — every statement is idempotent, so there is no separate
+migration step and re-applying is a no-op.
+
+`00_compat.sql` runs first and recreates the two things the policies depend on
+that are not part of core Postgres: `auth.uid()` and the `authenticated` role.
+Read it before anything else here. There is no `04_` — that file created the
+Supabase Storage bucket, which S3 replaced; the gap is deliberate, since
+renumbering would have changed the reviewed filenames of everything after it.
 
 ```
 01_schema.sql     tables, enums, indexes

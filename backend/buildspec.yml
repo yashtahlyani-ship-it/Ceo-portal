@@ -1,0 +1,49 @@
+version: 0.2
+
+# CodeBuild buildspec — GyFTR CEO Office Portal Backend
+# Buildspec path: backend/buildspec.yml
+# Project settings:
+#   - Environment: privileged = true (Docker)
+#   - Compute: ARM / Graviton (linux/arm64) to match BASE_IMAGE
+#   - Env vars set on the CodeBuild project:
+#       BACKEND_IMAGE_REPO_NAME, BACKEND_ECS_CONTAINER
+#
+# Note there are no application env vars here. The backend takes ALL of its
+# configuration at runtime, so this image is environment-agnostic: the same
+# artifact runs in UAT and production. Contrast frontend/buildspec.yml, where
+# Vite bakes the API URL into the bundle at build time and therefore needs it.
+
+env:
+  shell: bash
+  variables:
+    BASE_IMAGE: 653380732738.dkr.ecr.ap-south-1.amazonaws.com/node-24.18.0-alpine3.24-arm:node-24.18.0-alpine3.24-arm
+
+phases:
+  pre_build:
+    commands:
+      - echo "Logging in to Amazon ECR..."
+      - export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 653380732738.dkr.ecr.ap-south-1.amazonaws.com
+      - IMAGE_TAG=v1.$CODEBUILD_BUILD_NUMBER
+      - export BACKEND_IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$BACKEND_IMAGE_REPO_NAME:$IMAGE_TAG
+      - echo "Backend image -> $BACKEND_IMAGE_URI"
+
+  build:
+    commands:
+      - echo "Build started on $(date)"
+      - |
+        docker build -t $BACKEND_IMAGE_URI \
+          --build-arg BASE_IMAGE=$BASE_IMAGE \
+          ./backend
+
+  post_build:
+    commands:
+      - echo "Build completed on $(date)"
+      - docker push $BACKEND_IMAGE_URI
+      - printf '[{"name":"%s","imageUri":"%s"}]' "$BACKEND_ECS_CONTAINER" "$BACKEND_IMAGE_URI" > imagedefinitions.json
+      - cat imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json

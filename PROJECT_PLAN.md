@@ -59,19 +59,48 @@ PRD lists as candidate nav items, are reached instead through a dashboard metric
 and the task drawer's Activity tab respectively — they are views onto tasks, not
 separate collections.
 
-### Stack: Supabase vs. Marketing's Express + Cognito {#stack-decision}
+### Stack: where authorization lives {#stack-decision}
 
-The brief says to reuse the existing stack where technically appropriate. The
-Marketing Portal uses Express + Cognito + a hand-rolled `permissions.js`.
+> **Superseded in part, August 2026.** The original decision was to keep
+> Supabase rather than adopt Marketing's Express + Cognito stack. The platform
+> has since moved entirely to AWS, so the *infrastructure* half of this decision
+> was reversed. The *reasoning* half survived the move intact, and understanding
+> which is which matters — so both are recorded below rather than the section
+> being rewritten to look prescient.
 
-**Kept Supabase**, for one reason that outweighs stack symmetry: this product's
-central requirement is **per-assignment data isolation** — a stakeholder must not
-see a co-assignee's status, promised date or comments. Postgres row-level
-security expresses that as a predicate on the table itself, so it holds for every
-query path including any future one. Reimplementing it as middleware means every
-new endpoint is a fresh chance to leak. The frontend stack, design system and
-first-login password experience are unchanged from Marketing; only the data layer
-differs, and the divergence is recorded here rather than made quietly.
+**The original decision (v1).** The brief said to reuse the existing stack where
+technically appropriate; Marketing uses Express + Cognito + a hand-rolled
+`permissions.js`. Supabase was kept for one reason that outweighed stack
+symmetry: this product's central requirement is **per-assignment data
+isolation** — a stakeholder must not see a co-assignee's status, promised date or
+comments. Postgres row-level security expresses that as a predicate on the table
+itself, so it holds for every query path including any future one.
+Reimplementing it as middleware means every new endpoint is a fresh chance to
+leak.
+
+**What changed (v2).** The instruction was to eliminate the Supabase and Vercel
+dependencies and run on AWS like the siblings. That is now done: ECS, RDS,
+Cognito, S3.
+
+**What did not change, and why.** RLS is a **PostgreSQL** feature, not a Supabase
+one. Moving to RDS did not require giving it up, so the argument above still
+applies word for word and the policies moved across untouched. What Supabase
+actually provided was two conveniences the policies lean on — `auth.uid()` and
+the `authenticated` role — and both are recreated in ~30 lines by
+`backend/sql/00_compat.sql`.
+
+The alternative was to re-express 19 policies and 25 functions as Express
+middleware for the sake of matching the siblings exactly. That would have meant
+rewriting the security boundary during an infrastructure migration and
+re-proving all 41 security tests against new code — accepting real risk to gain
+consistency. Consistency was the weaker argument then and is the weaker argument
+now.
+
+**The cost of keeping it.** One new failure mode that did not previously exist:
+there is now application code between the user and the policies, and a route
+that calls `query()` instead of `withUser()` silently bypasses every one of
+them. This is covered by `tests/routes.test.mjs`, which fails the build
+statically. See DEPLOY.md for the rule and the reasoning.
 
 ---
 
@@ -96,7 +125,8 @@ frontend was largely skeletal and was completed.
 - Attachments tab: upload, signed-URL download, delete, with size/type errors
 - Saved Views unified onto the board's own filter shape, plus rename
 - Drawer accessibility: ARIA tablist with arrow-key roving focus, Escape to close
-- `supabase/04_storage.sql` — the private bucket and its policies (did not exist)
+- `04_storage.sql` — the private attachment bucket and its policies (did not
+  exist). Superseded by S3 in the AWS migration; see `backend/s3.js`.
 - ESLint config matching Marketing's
 - 61 tests (see §5)
 
@@ -153,17 +183,31 @@ guard that could be forgotten. RLS was not changed.
 
 ## 5. Testing strategy
 
-Two layers, with a deliberate split of responsibility.
+Four layers, with a deliberate split of responsibility.
 
 **Unit (`tests/logic.test.mjs`, 23 tests)** — pure functions, no network.
 Transition rules, permission predicates, filters, dashboard derivations, date
 formatting, error copy.
 
-**Integration (`tests/security.test.mjs`, 41 tests)** — against the **real**
-Supabase project, signing in as real users with the **anon key**: exactly the
-surface a browser has. The service role appears only to build fixtures and to
-independently verify what actually landed in the table — never to perform the
-action under test.
+**Route safety (`tests/routes.test.mjs`, 5 tests)** — static analysis of
+`backend/routes/`, added by the AWS migration. It fails the build if a handler
+calls the RLS-bypassing `query()` instead of `withUser()`, if `withUser` is
+passed anything other than `req.profile.id`, or if an `/api` router is mounted
+above the authentication middleware. No database, milliseconds, runs in CI on
+every push. See the file's header for why this specific gap needed covering.
+
+**Integration (`tests/security.test.mjs`, 41 tests)** — against a **real**
+Postgres database, with every statement running through
+`set local role authenticated` and `app.user_id` set: byte for byte the path
+`withUser()` takes in production. The owner connection appears only to build
+fixtures and to independently verify what actually landed in the table — never
+to perform the action under test.
+
+**API (`tests/api.test.mjs`)** — against a **deployed** stack. Covers the four
+things a bare database cannot: Cognito sign-in, forged-token rejection, the
+invite flow, and the attachment byte round trip. Skips itself when not
+configured, so a laptop without VPN access gets a clean run rather than a red
+one people learn to ignore.
 
 This distinction is the point. A passing test here means the *server* refused,
 not that the UI hid a button. Coverage: authentication, role permissions, every
@@ -179,9 +223,9 @@ bucket privacy, and stakeholder onboarding.
 | Risk | Assessment |
 |---|---|
 | **Demo password is shared and printed** | Fine for a demo; must be rotated before real use. Documented in DEMO.md. |
-| **Two auth systems in the ecosystem** | Cognito (Marketing/Legal) and Supabase Auth (here). Users maintain two passwords. Acceptable at ~17 users; consolidating is a future call, not a v1 one. |
+| ~~Two auth systems in the ecosystem~~ | **Resolved (Aug 2026).** All three portals now use Cognito. One password each. |
 | **No drag-and-drop on the Kanban** | Movement is via explicit buttons and menus — keyboard-accessible, unambiguous, and every move is audited. Drag would be additive, not a replacement. |
-| **Bundle is ~498 kB (139 kB gzipped)** | React DOM, the Supabase client and lucide icons. No obvious fat to cut. (An earlier revision of this row blamed Recharts — that was wrong; it was never imported, so Vite tree-shook it. The dependency has since been dropped.) |
+| **Bundle is ~381 kB (113 kB gzipped)** | React DOM, `amazon-cognito-identity-js` and lucide icons. Down ~117 kB from the Supabase build, which is a side effect of the migration rather than a goal of it. (An earlier revision of this row blamed Recharts — that was wrong; it was never imported, so Vite tree-shook it. The dependency has since been dropped.) |
 | **9 lint warnings** | React-Compiler-era rules from `react-hooks` v7 that the Marketing Portal also violates (53 occurrences there). Kept as warnings, not disabled — see the note in `frontend/eslint.config.js`. Fixing them is a cross-product change. |
 | **Attachment orphans** | If the metadata insert fails after an upload, the object is removed. If *that* cleanup fails, an unreferenced object remains — invisible to the app, but it consumes storage. |
 | **No notifications** | Explicitly out of scope. The dashboard is the monitoring mechanism. |

@@ -60,27 +60,18 @@ drop trigger if exists trg_touch_profiles on profiles;
 create trigger trg_touch_profiles before update on profiles
   for each row execute function touch_updated_at();
 
--- ── New auth user → profile safety net ───────────────────────────────────────
--- Accounts are created by the admin script with role/name in user metadata.
--- This trigger guarantees a profile row exists even if that metadata is absent.
-create or replace function handle_new_auth_user()
-returns trigger language plpgsql security definer set search_path = public as $$
-begin
-  insert into profiles (id, email, name, role, title)
-  values (
-    new.id,
-    new.email,
-    coalesce(new.raw_user_meta_data->>'name', split_part(new.email,'@',1)),
-    coalesce((new.raw_user_meta_data->>'role')::user_role, 'stakeholder'),
-    new.raw_user_meta_data->>'title'
-  )
-  on conflict (id) do nothing;
-  return new;
-end $$;
-
-drop trigger if exists trg_new_auth_user on auth.users;
-create trigger trg_new_auth_user after insert on auth.users
-  for each row execute function handle_new_auth_user();
+-- ── New auth user → profile ──────────────────────────────────────────────────
+-- On Supabase this was a trigger on auth.users: the identity provider lived in
+-- the same database, so a new sign-up could synchronously create its profile.
+--
+-- Cognito is a separate service and cannot fire a Postgres trigger, so the
+-- safety net moved into the request path instead — middleware/identity.js
+-- resolves the verified token's `sub` to a profile on every request, and links
+-- or creates one if it is the person's first sign-in. See that file for the
+-- rules on when auto-linking by email is and is not allowed.
+--
+-- Nothing is lost by the move: the trigger only ever ran on account creation,
+-- which is exactly when identity.js now runs its first-sight path.
 
 -- ════════════════════════════════════════════════════════════════════════════
 --  AUDIT TRIGGERS — append-only, capture every path

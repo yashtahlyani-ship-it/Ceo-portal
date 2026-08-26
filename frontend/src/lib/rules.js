@@ -43,7 +43,7 @@ export const canReopen = (role, assignment) => isExecutiveRole(role) && assignme
 
 // CR-01 #6: a task the stakeholder raised for themselves has no propose →
 // confirm handshake. The date they set is final, so neither end of that flow
-// applies. Mirrors the SELF_CREATED guards in supabase/05_cr01.sql.
+// applies. Mirrors the SELF_CREATED guards in backend/sql/05_cr01.sql.
 export const isSelfCreated = (task) => task?.creator?.role === 'stakeholder';
 
 export const canConfirmPromised = (role, assignment, task) =>

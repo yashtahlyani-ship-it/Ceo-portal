@@ -35,22 +35,49 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 -- ── profiles ────────────────────────────────────────────────────────────────
--- Mirrors auth.users (id = auth.uid()). Rows are created for stakeholders by the
--- admin script (scripts/create-stakeholder.mjs) and, as a safety net, by a
--- trigger on auth.users (see 02_functions.sql). There is NO public signup.
+-- The identity table. `id` is what auth.uid() returns and what every RLS
+-- policy compares against.
+--
+-- On Supabase this was `references auth.users(id)` — the identity provider
+-- lived in the same database, so the foreign key could enforce the link. AWS
+-- Cognito is a separate service, so the link is now `cognito_sub`: the `sub`
+-- claim of the verified ID token, resolved to a profile once per request by
+-- middleware/identity.js.
+--
+-- Deliberately NOT NOT-NULL, and deliberately not the primary key:
+--
+--  • Nullable, because the EA creates a profile for a new joiner before that
+--    person has ever signed in and been minted a `sub`. The row exists first
+--    and is claimed on first login.
+--  • Not the primary key, because `id` is referenced by six other tables and
+--    appears in every policy. Keeping the internal id stable means a person
+--    can be re-created in Cognito — which happens, e.g. federated logins mint
+--    a fresh `sub` — without orphaning their tasks, comments and audit trail.
 create table if not exists profiles (
-  id          uuid primary key references auth.users(id) on delete cascade,
+  id          uuid primary key default gen_random_uuid(),
+  cognito_sub text unique,                  -- the verified Cognito `sub` claim
   email       text not null unique,
   name        text not null,
   role        user_role not null default 'stakeholder',
   title       text,                         -- e.g. "Head of Marketing"
   color       text,                         -- avatar colour
   active      boolean not null default true,
+  must_set_password boolean not null default false,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
 create index if not exists profiles_role_idx   on profiles(role);
 create index if not exists profiles_active_idx on profiles(active);
+
+-- Added by the AWS migration; `add column if not exists` so an environment
+-- created before the move picks them up on the next boot rather than needing a
+-- hand-run ALTER.
+alter table profiles add column if not exists cognito_sub text;
+alter table profiles add column if not exists must_set_password boolean not null default false;
+
+do $$ begin
+  alter table profiles add constraint profiles_cognito_sub_key unique (cognito_sub);
+exception when duplicate_table or duplicate_object then null; end $$;
 
 -- ── tasks ───────────────────────────────────────────────────────────────────
 -- The executive request. No status column by design (see invariants above).

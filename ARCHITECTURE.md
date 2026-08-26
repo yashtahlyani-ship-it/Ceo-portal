@@ -2,15 +2,27 @@
 
 ```
 Browser (React 19 + Vite)
-   │  anon key only — never the service role
+   │  a Cognito ID token — no other credential exists client-side
    ▼
-Supabase
-   ├── Auth ......... email/password, first-login password set
-   ├── PostgREST .... reads, gated by Row-Level Security
+Express API (ECS Fargate, arm64)
+   ├── requireAuth ....... verifies the token signature (aws-jwt-verify)
+   ├── loadIdentity ...... resolves `sub` → a profiles row
+   └── withUser(id, fn) .. opens a transaction, sets auth.uid(), SET ROLE
+        │
+        ▼
+   RDS Postgres  ← EVERY access decision is made here
+   ├── RLS .......... reads and direct writes, gated by row predicates
    ├── RPC .......... every controlled mutation, rule checked inside
-   ├── Storage ...... private bucket, RLS-gated signed URLs
-   └── Edge Function  create-stakeholder (service role, server-side only)
+   └── triggers ..... append-only audit on every path
+
+   S3 (private) ..... attachment bytes, 60-second presigned URLs
+   Cognito .......... accounts, first-login password challenge
 ```
+
+The client is a rendering layer with **no authority**, and so, unusually, is the
+API. The backend authenticates and then gets out of the way: it does not decide
+who may see what. That decision is a row predicate in Postgres, which is why it
+holds on query paths nobody has written yet.
 
 The client is a rendering layer with **no authority**. Every rule it knows about
 exists so the right buttons appear; the server re-checks all of them.
@@ -42,8 +54,9 @@ src/
     ProposedDates.jsx      CR-02 promised-date decision queue (admin-only)
   hooks/useAuth.jsx        session, profile, first-login gate
   lib/
-    supabase.js            client
-    api.js                 the only module that talks to Supabase
+    http.js                transport: fetch + Cognito token refresh
+    cognito.js             sign-in, first-login challenge, session restore
+    api.js                 the only module that talks to the API
     rules.js               client mirror of the server's rules (UX only)
     filters.js             pure board filtering + error copy
     derive.js              tasks → dashboard numbers
@@ -86,9 +99,11 @@ watching the board sees a stakeholder's move appear.
 
 ## Backend
 
-There is no bespoke server. Postgres is the backend.
+Express is a thin, deliberately unopinionated layer; **Postgres is where the
+backend's decisions are made.** See `backend/sql/00_compat.sql` for the
+mechanism and `tests/routes.test.mjs` for the guard that keeps it true.
 
-### Three layers in `supabase/02_functions.sql` (extended by `05_cr01.sql`)
+### Three layers in `backend/sql/02_functions.sql` (extended by `05_cr01.sql`)
 
 **1. Identity helpers** — `app_role()`, `is_executive()`, `owns_assignment()`,
 `can_see_task()`. `SECURITY DEFINER` so they can read `profiles` from inside an
@@ -138,20 +153,30 @@ assert the mirror; the integration tests assert the server.
 
 ## Auth
 
-Supabase email/password. No public signup — the anon key cannot create a user
-because accounts are only created by the `create-stakeholder` Edge Function or
-the admin scripts, both of which use the service role after checking the caller.
+AWS Cognito, email/password — the same pool pattern as the Marketing and Legal
+portals. No public signup: accounts are created only by
+`POST /api/admin/stakeholders` or the admin scripts, both of which check the
+caller is an executive first.
 
-**First login:** a new account is stamped `must_set_password: true` in
-`user_metadata`. `useAuth` reads that flag and holds the person on the
-"set a new password" screen until they choose one; `setPassword()` sets the
-password and clears the flag in a single `updateUser` call, so a mid-flow refresh
-cannot strand them. This mirrors the Cognito `NEW_PASSWORD_REQUIRED` challenge
-used by the Marketing and Legal portals, expressed in Supabase's terms.
+**First login:** a new account is created in `FORCE_CHANGE_PASSWORD`, so Cognito
+answers `authenticateUser` with a `NEW_PASSWORD_REQUIRED` challenge **instead of
+a session**.
 
-A `handle_new_auth_user` trigger on `auth.users` guarantees a `profiles` row
-exists for every auth user, defaulting to `stakeholder` — so a missing or
-tampered metadata payload can never mint an executive.
+That is worth dwelling on, because it fixed a real bug rather than just moving
+one. The Supabase implementation stamped `must_set_password` in user metadata
+and trusted the React app to honour it — and the app once did not, letting every
+new user walk straight past the screen while a test asserting the flag was set
+went on passing. The gate now lives in the token issuer: there is no token until
+the password is set, so a client that forgets to render the screen has nothing
+to render the board with either. The bug class is gone, not fixed.
+
+`profiles.cognito_sub` links an account to a profile, and
+`backend/middleware/identity.js` establishes that link on first sign-in. It will
+only claim a profile whose `cognito_sub` is null and whose email Cognito has
+**verified** — an unverified email claim is attacker-controllable in a federated
+pool, and trusting one would let somebody sign up with the CEO's address and
+inherit the CEO's role. There is deliberately no auto-create: a profile carries a
+role, so someone in the pool without one is someone the EA has not onboarded.
 
 ---
 

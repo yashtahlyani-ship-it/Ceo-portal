@@ -1,19 +1,34 @@
 // ════════════════════════════════════════════════════════════════════════════
 //  SECURITY + WORKFLOW INTEGRATION TESTS
 //
-//  These run against the REAL Supabase project using the anon key and real
-//  sign-ins — exactly the surface a browser has. Nothing here uses the service
-//  role, so every pass is evidence that the server itself refuses, not that the
-//  UI hid a button.
+//  These run against a REAL Postgres database, through exactly the path a live
+//  request takes: `set local role authenticated` with `app.user_id` set, which
+//  is what backend/db.js withUser() does on every request. Nothing here runs as
+//  the table owner except fixtures and verification, so every pass is evidence
+//  that the SERVER refuses — not that the UI hid a button.
 //
-//    node --test tests/
+//    npm run test:security
 //
-//  Requires .env at the project root (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY,
-//  SUPABASE_SERVICE_ROLE_KEY) and a seeded database (cd scripts && npm run seed).
+//  Requires .env at the project root (DB_HOST, DB_NAME, DB_USER, DB_PASSWORD)
+//  and a seeded database (npm run seed).
+//
+//  ── Migration note ──────────────────────────────────────────────────────────
+//
+//  These assertions are unchanged from the Supabase era. That is deliberate:
+//  they are the reason anyone can believe the isolation guarantee, and
+//  re-deriving 41 of them by hand during an infrastructure migration is how a
+//  security test gets quietly weakened while still passing. The substrate was
+//  recreated instead — see tests/pg-shim.mjs and backend/sql/00_compat.sql.
+//
+//  Four tests DID have to change, because they tested Supabase products rather
+//  than this schema: password sign-in, the invite Edge Function, and the two
+//  that pushed real bytes through Supabase Storage. Those moved to
+//  tests/api.test.mjs, which exercises Cognito and S3 through the deployed API.
+//  Everything about RLS, the RPCs and the workflow is still right here.
 // ════════════════════════════════════════════════════════════════════════════
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { anonClient, signIn, admin, DEMO_PASSWORD, freshTask, cleanup, profileIdFor, accounts } from './helpers.mjs';
+import { anonClient, signIn, admin, freshTask, cleanup, profileIdFor, accounts } from './helpers.mjs';
 
 // Resolved from the database, not hard-coded — the real roster is gitignored,
 // so no live address may appear in this public repository. See helpers.mjs.
@@ -22,25 +37,28 @@ const { EA, CEO, ALICE, BOB } = await accounts();
 test.after(cleanup);
 
 /* ── Authentication ──────────────────────────────────────────────────────── */
+//
+// Password sign-in itself is now Cognito's job and is tested in api.test.mjs.
+// What belongs HERE is the database's own behaviour when a request carries no
+// identity — which is the part that has to hold even if the auth layer is
+// bypassed entirely.
 
-test('EA, CEO and stakeholder can all sign in', async () => {
-  for (const email of [EA, CEO, ALICE]) {
-    const c = anonClient();
-    const { error } = await c.auth.signInWithPassword({ email, password: DEMO_PASSWORD });
-    assert.equal(error, null, `${email} should sign in`);
-  }
-});
-
-test('a wrong password is rejected', async () => {
-  const c = anonClient();
-  const { error } = await c.auth.signInWithPassword({ email: ALICE, password: 'not-the-password' });
-  assert.ok(error, 'sign-in should fail');
-});
-
-test('an anonymous caller reads no tasks at all', async () => {
-  const c = anonClient();                       // never signed in
+test('a caller with no identity reads no tasks at all', async () => {
+  const c = anonClient();               // role `authenticated`, but auth.uid() is NULL
   const { data } = await c.from('tasks').select('*');
-  assert.deepEqual(data ?? [], [], 'RLS must return nothing to an unauthenticated caller');
+  assert.deepEqual(data ?? [], [], 'RLS must return nothing to a caller with no identity');
+});
+
+test('a caller with no identity sees no assignments, comments or audit rows', async () => {
+  // The failure this guards against is a request reaching Postgres without
+  // app.user_id set — a bug in withUser, or a route that forgot it. auth.uid()
+  // returns NULL, every policy comparison against it is NULL (not true), and so
+  // the database must fail CLOSED rather than open.
+  const c = anonClient();
+  for (const table of ['task_assignments', 'task_comments', 'audit_log', 'notifications', 'profiles']) {
+    const { data } = await c.from(table).select('*');
+    assert.deepEqual(data ?? [], [], `${table} must return nothing without an identity`);
+  }
 });
 
 /* ── Role permissions ────────────────────────────────────────────────────── */
@@ -714,42 +732,34 @@ test('CR-02: Saved Views is gone — the table no longer exists', async () => {
   assert.ok(error, 'the withdrawn feature leaves nothing queryable behind');
 });
 
-/* ── Stakeholder onboarding (Edge Function) ──────────────────────────────── */
+/* ── Stakeholder onboarding ──────────────────────────────────────────────── */
+//
+// Creating the Cognito account is tested in api.test.mjs, which can reach
+// Cognito. What is testable here — and is the part that matters if the API's
+// own role check were ever removed — is that the DATABASE independently refuses
+// to let a stakeholder write a profile.
 
-test('only an executive can add a stakeholder, and the new account must set a password', async () => {
-  // A stakeholder calling the function directly is refused server-side.
+test('a stakeholder cannot create a profile, even directly', async () => {
   const alice = await signIn(ALICE);
-  const refused = await alice.functions.invoke('create-stakeholder', {
-    body: { name: 'Should Not Exist', email: `reject-${Date.now()}@example.invalid` },
+  const r = await alice.from('profiles').insert({
+    email: `reject-${Date.now()}@example.invalid`,
+    name: 'Should Not Exist',
+    role: 'stakeholder',
   });
-  assert.ok(refused.error || refused.data?.error, 'a stakeholder must not create accounts');
+  assert.ok(r.error, 'profiles_insert is with check (is_executive())');
+});
 
-  // The CEO can.
-  const email = `probe-${Date.now()}@example.invalid`;
-  const ceo = await signIn(CEO);
-  const { data, error } = await ceo.functions.invoke('create-stakeholder', {
-    body: { name: 'Probe Head', email, title: 'Head of Probe' },
-  });
-  assert.equal(error, null, 'the CEO should create a stakeholder');
-  assert.equal(data.email, email);
-  assert.ok(data.tempPassword?.length >= 12, 'a temporary password is issued');
+test('a stakeholder cannot promote themselves to an executive', async () => {
+  // The most valuable thing an attacker could do with a stakeholder account:
+  // set their own role to 'ceo' and inherit the whole board plus executive
+  // override. profiles_write is `using (is_executive())`, so the UPDATE matches
+  // zero rows rather than erroring — verify the row is genuinely untouched.
+  const alice = await signIn(ALICE);
+  const aliceId = await profileIdFor(ALICE);
+  await alice.from('profiles').update({ role: 'ceo' }).eq('id', aliceId);
 
-  const { data: users } = await admin.auth.admin.listUsers();
-  const created = users.users.find((u) => u.email === email);
-  assert.ok(created, 'the auth user exists');
-  // NOTE: this asserts the server SETS the flag. Whether the app actually holds
-  // the person on the set-password screen is a client-side render guard in
-  // App.jsx that no test here can reach — it shipped broken once precisely
-  // because this assertion passed while the UI let people straight through.
-  // Re-verify that path in a browser when touching auth. See HANDOVER.md §9.
-  assert.equal(created.user_metadata.must_set_password, true,
-    'the account is stamped for the first-login password step');
-
-  const { data: profile } = await admin.from('profiles').select('role, title, active').eq('id', created.id).single();
-  assert.equal(profile.role, 'stakeholder', 'never created as an executive');
-  assert.equal(profile.active, true);
-
-  await admin.auth.admin.deleteUser(created.id);
+  const [row] = await admin.sql('select role from profiles where id = $1', [aliceId]);
+  assert.equal(row.role, 'stakeholder', 'role must be unchanged');
 });
 
 /* ── Attachments ─────────────────────────────────────────────────────────── */
@@ -759,7 +769,7 @@ test('attachment metadata follows task visibility; stakeholders cannot upload', 
   await admin.from('task_attachments').insert({
     task_id: taskId, storage_path: `task/${taskId}/probe.pdf`, file_name: 'probe.pdf',
     mime_type: 'application/pdf', size_bytes: 1234,
-    uploaded_by: (await admin.from('profiles').select('id').eq('email', CEO).single()).data.id,
+    uploaded_by: await profileIdFor(CEO),
   });
 
   // Alice is assigned, so she may see it.
@@ -775,55 +785,54 @@ test('attachment metadata follows task visibility; stakeholders cannot upload', 
   // And a stakeholder cannot add one.
   const r = await alice.from('task_attachments').insert({
     task_id: taskId, storage_path: `task/${taskId}/nope.pdf`, file_name: 'nope.pdf',
-    uploaded_by: (await alice.auth.getUser()).data.user.id,
+    uploaded_by: await profileIdFor(ALICE),
   });
   assert.ok(r.error, 'a stakeholder must not upload attachments');
 });
 
-test('a real file round-trips: executive uploads bytes, assignee downloads them, nobody else can', async () => {
-  const { taskId } = await freshTask({ assignees: [ALICE], title: 'attachment round-trip' });
+// The byte-level round trip (upload → presigned URL → download) moved to
+// api.test.mjs, because on AWS it is the API that mints URLs, not the database.
+//
+// That relocation is worth understanding rather than skimming. On Supabase the
+// bucket had its own RLS policy — `can_see_task(storage_task_id(name))` — so
+// the bytes were protected by the same predicate as the metadata and this file
+// could test both at once. S3 has no such policy: a presigned URL is a bearer
+// credential and the bucket cannot consult Postgres.
+//
+// So the check moved up one layer, into routes/attachments.js, which re-reads
+// the row through withUser() before presigning anything. It is the ONE place in
+// the whole migration where a guarantee left the database, which is exactly why
+// it now needs its own test at the layer that enforces it.
 
-  // A genuine (tiny) PDF, pushed through the same anon-key path the browser uses.
-  const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a]);
-  const file = new Blob([bytes], { type: 'application/pdf' });
-  const path = `task/${taskId}/${crypto.randomUUID()}-brief.pdf`;
+test('an assignee sees attachment metadata for their task; a non-assignee sees none', async () => {
+  const { taskId } = await freshTask({ assignees: [ALICE], title: 'attachment visibility' });
+  await admin.from('task_attachments').insert({
+    task_id: taskId, storage_path: `task/${taskId}/brief.pdf`, file_name: 'brief.pdf',
+    mime_type: 'application/pdf', size_bytes: 9,
+    uploaded_by: await profileIdFor(CEO),
+  });
 
-  const ceo = await signIn(CEO);
-  const up = await ceo.storage.from('task-attachments')
-    .upload(path, file, { contentType: 'application/pdf' });
-  assert.equal(up.error, null, 'an executive can upload');
-
-  // The assignee can mint a signed URL and actually read the bytes back.
   const alice = await signIn(ALICE);
-  const signed = await alice.storage.from('task-attachments').createSignedUrl(path, 60);
-  assert.equal(signed.error, null, 'an assignee can mint a signed URL');
+  const { data: mine } = await alice.from('task_attachments').select('*').eq('task_id', taskId);
+  assert.equal(mine.length, 1, 'the assignee can see it');
 
-  const res = await fetch(signed.data.signedUrl);
-  assert.equal(res.ok, true, 'the signed URL actually serves the file');
-  const back = new Uint8Array(await res.arrayBuffer());
-  assert.deepEqual(back, bytes, 'the bytes round-trip unchanged');
-
-  // Bob holds no assignment on this task.
+  // This is what stops routes/attachments.js minting a URL for Bob: it looks
+  // the row up through withUser, and for Bob that lookup returns nothing.
   const bob = await signIn(BOB);
-  const foreign = await bob.storage.from('task-attachments').createSignedUrl(path, 60);
-  assert.ok(foreign.error || !foreign.data?.signedUrl, 'a non-assignee cannot mint a URL');
-
-  // And a stakeholder cannot upload at all.
-  const shUpload = await alice.storage.from('task-attachments')
-    .upload(`task/${taskId}/nope.pdf`, file, { contentType: 'application/pdf' });
-  assert.ok(shUpload.error, 'a stakeholder must not upload');
-
-  await admin.storage.from('task-attachments').remove([path]);
+  const { data: theirs } = await bob.from('task_attachments').select('*').eq('task_id', taskId);
+  assert.deepEqual(theirs ?? [], [], 'a non-assignee cannot even resolve the row');
 });
 
-test('the attachments bucket is private and refuses a foreign task’s object', async () => {
-  const { data: bucket } = await admin.storage.getBucket('task-attachments');
-  assert.equal(bucket.public, false, 'the bucket must not be public');
-
-  // A task Bob is NOT assigned to.
+test('a stakeholder cannot delete an attachment', async () => {
   const { taskId } = await freshTask({ assignees: [ALICE] });
-  const bob = await signIn(BOB);
-  const { data, error } = await bob.storage.from('task-attachments')
-    .createSignedUrl(`task/${taskId}/anything.pdf`, 60);
-  assert.ok(error || !data?.signedUrl, 'a non-assignee must not mint a signed URL for that task');
+  await admin.from('task_attachments').insert({
+    task_id: taskId, storage_path: `task/${taskId}/keep.pdf`, file_name: 'keep.pdf',
+    uploaded_by: await profileIdFor(CEO),
+  });
+
+  const alice = await signIn(ALICE);
+  await alice.from('task_attachments').delete().eq('task_id', taskId);
+
+  const rows = await admin.sql('select id from task_attachments where task_id = $1', [taskId]);
+  assert.equal(rows.length, 1, 'at_delete is using (is_executive()) — the row must survive');
 });

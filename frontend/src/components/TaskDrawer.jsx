@@ -399,7 +399,10 @@ function Attachments({ task, isExec, refresh }) {
 
   const open = async (row) => {
     setErr('');
-    try { window.open(await api.attachmentUrl(row.storage_path), '_blank', 'noopener'); }
+    // By attachment id, not by storage path. The server looks the row up
+    // through RLS and presigns only what the caller may actually see — passing
+    // a path would let the client name any object in the bucket.
+    try { window.open(await api.attachmentUrl(row.id), '_blank', 'noopener'); }
     catch { setErr('That file could not be opened. It may have been removed.'); }
   };
 

@@ -6,157 +6,183 @@ see [`HANDOVER.md`](HANDOVER.md).
 
 ---
 
-## Read this first — how this differs from Marketing and Legal
+## Read this first — the shape of the system
 
-The three portals share a repository shape, a design system, a base image and a
-CodeBuild pattern. They **do not** share a backend.
+The three portals now share a repository shape, a design system, a base image,
+a CodeBuild pattern **and an architecture.**
 
 | | Marketing | Legal | **CEO Office** |
 |---|---|---|---|
 | Frontend container | ✅ port 7867 | ✅ port 7979 | ✅ **port 7868** |
-| Backend container | ✅ Express, 7878 | ✅ Express, 7978 | ❌ **none** |
-| Database | self-managed Postgres | self-managed Postgres | **Supabase (managed)** |
-| Auth | AWS Cognito | AWS Cognito | **Supabase Auth** |
-| File storage | — | S3 | **Supabase Storage** |
+| Backend container | ✅ Express, 7878 | ✅ Express, 7978 | ✅ **Express, 7869** |
+| Database | RDS Postgres | RDS Postgres | **RDS Postgres** |
+| Auth | AWS Cognito | AWS Cognito | **AWS Cognito** |
+| File storage | — | S3 | **S3** |
 
-**There is one image to build and one service to run.** If you are looking for
-`backend/`, `server.js` or a second ECS task definition, they do not exist and
-nothing is missing. The API, authorisation, file storage and the entire
-permission model live inside Postgres on Supabase — see
-[`ARCHITECTURE.md`](ARCHITECTURE.md) and
-[`PROJECT_PLAN.md`](PROJECT_PLAN.md#stack-decision) for why.
+**Two images to build, two services to run.** If you worked on this repository
+before August 2026 you may remember a single container and a Supabase
+dependency — that is gone. There is no Supabase project, no Vercel deployment
+and no service-role key anywhere in this system.
 
-The practical consequence for AWS: **the app depends on a service outside your
-VPC.** The browser talks to Supabase directly over HTTPS; the container never
-does. So the container needs no database credentials, no security-group rule to
-a database, and no secrets at runtime at all.
+### The one way this differs from its siblings
+
+Marketing and Legal enforce authorization in Express middleware. **This one
+enforces it in Postgres Row-Level Security**, and the backend's job is to bind
+a verified identity to each transaction rather than to decide anything itself.
+
+That is not a leftover from Supabase — RLS is a PostgreSQL feature and it moved
+across untouched. It was kept because this product's central requirement is
+that one stakeholder can never see a co-assignee's status, promised date or
+comments. Expressed as a row predicate, that holds on every query path,
+including ones nobody has written yet.
+
+What it means in practice, for anyone adding an endpoint:
+
+```js
+// Correct. RLS decides what comes back.
+const tasks = await withUser(req.profile.id, c => c.query('select * from tasks'));
+
+// WRONG. Runs as the table owner and bypasses every policy in the schema.
+const tasks = await query('select * from tasks');
+```
+
+`npm run test:unit` fails the build if a route reaches for the second one. See
+[`tests/routes.test.mjs`](tests/routes.test.mjs), and
+[`backend/sql/00_compat.sql`](backend/sql/00_compat.sql) for how it works.
 
 ---
 
-## What the frontend needs, and when
+## What each image needs, and when
 
-Both values are **baked into the JavaScript bundle at build time** by Vite. They
-must be passed as `--build-arg` / CodeBuild environment variables. Setting them
-on the running task does nothing — the bundle is already compiled.
+### Frontend — build time
 
-| Variable | Value |
+Vite **compiles these into the JavaScript bundle**. They must be passed as
+`--build-arg` / CodeBuild environment variables. Setting them on the running
+task does nothing; the bundle is already built.
+
+| Variable | Example |
 |---|---|
-| `VITE_SUPABASE_URL` | `https://<project-ref>.supabase.co` |
-| `VITE_SUPABASE_ANON_KEY` | the project's **anon / publishable** key |
+| `VITE_API_URL` | `https://ceo-api.gyftr.net` |
+| `VITE_COGNITO_USER_POOL_ID` | `ap-south-1_XXXXXXXXX` |
+| `VITE_COGNITO_CLIENT_ID` | the app client id — **created without a secret** |
 
-> The anon key is **public by design**. It identifies the project; it grants
-> nothing on its own. Every access decision is made by Postgres Row-Level
-> Security. Publishing it in a browser bundle is the intended design, not an
-> oversight — see [`SECURITY.md`](SECURITY.md).
+> All three are **public by design**: an address and two identifiers. They ship
+> in a file every visitor downloads and grant nothing on their own. Security is
+> the Cognito signature check on every request and the RLS policies behind it.
 >
-> The **service-role key** is a different thing entirely: it bypasses RLS. It
-> must never be given to CodeBuild, never reach the container, and never appear
-> in any `VITE_`-prefixed variable. Both the buildspec and CI fail the build if
-> they find it in `dist/`.
+> The app client for the browser **must have no client secret**. A browser
+> cannot keep one, and `amazon-cognito-identity-js` will not authenticate
+> against a client that has one. Both the buildspec and CI grep `dist/` for
+> `CLIENT_SECRET`, AWS keys and database passwords, and fail the build.
+
+The build **fails fast** if any of the three is missing, rather than shipping an
+app that loads and then cannot sign anybody in.
+
+### Backend — run time
+
+The backend takes **all** of its configuration at runtime, so the image is
+environment-agnostic: the same artifact runs in UAT and production.
+
+| Variable | Notes |
+|---|---|
+| `AWS_SECRET_NAME` | **preferred.** Secrets Manager id, e.g. `gyftr/ceo/db` |
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | used only when `AWS_SECRET_NAME` is unset |
+| `COGNITO_USER_POOL_ID` / `COGNITO_CLIENT_ID` / `COGNITO_REGION` | required — the process exits at boot without the first two |
+| `ATTACHMENTS_BUCKET` | private S3 bucket |
+| `FRONTEND_URL` | the CORS allow-list. Never `*` |
+| `NODE_ENV=production` | enables TLS to RDS |
+
+Prefer `AWS_SECRET_NAME`: a password in a task definition is readable by anyone
+holding `ecs:DescribeTaskDefinition`.
 
 ---
 
-## 1. Frontend
+## 1. Build and deploy
 
-CodeBuild runs [`frontend/buildspec.yml`](frontend/buildspec.yml). It builds the
-ARM image, pushes it to ECR and writes `imagedefinitions.json` for the ECS
-deploy stage — the same shape as the sibling portals.
+Two CodeBuild projects, same pattern as the siblings:
 
-Set these on the CodeBuild project:
+| | Buildspec | Project variables |
+|---|---|---|
+| Frontend | `frontend/buildspec.yml` | `FRONTEND_IMAGE_REPO_NAME`, `FRONTEND_ECS_CONTAINER`, the three `VITE_*` |
+| Backend | `backend/buildspec.yml` | `BACKEND_IMAGE_REPO_NAME`, `BACKEND_ECS_CONTAINER` |
 
-```
-FRONTEND_IMAGE_REPO_NAME    ECR repo, e.g. gyftr-ceo-portal-frontend
-FRONTEND_ECS_CONTAINER      container name in the ECS task definition
-VITE_SUPABASE_URL
-VITE_SUPABASE_ANON_KEY
-```
+Both must be **ARM / Graviton** and **privileged**. Each writes
+`imagedefinitions.json` for its ECS deploy stage.
 
-The build **fails fast** if either `VITE_` value is missing, rather than
-shipping an app that loads and then cannot reach its database.
-
-Locally, the same image:
+Locally, the whole stack including a throwaway Postgres:
 
 ```bash
-cp .env.example .env       # fill in the two VITE_ values
-docker compose up --build  # → http://localhost:7868
+cp .env.example .env       # fill in the Cognito values
+docker compose up --build  # → frontend :7868, backend :7869, postgres :5442
 ```
 
-Health check is `GET /` on 7868. `serve -s` rewrites unknown paths to
-`index.html`, which the SPA router needs — without it a refresh on any deep link
-returns 404 from the container and the load balancer may mark the task
-unhealthy.
+Health checks: `GET /` on 7868, `GET /health` on 7869.
 
 ---
 
 ## 2. Database
 
-Supabase, applied in filename order. They are idempotent (`create or replace`,
-`drop policy if exists`, `create table if not exists`), so re-applying is safe —
-this was verified end to end.
+**There is no migration step.** `backend/db.js` applies `backend/sql/*.sql` in
+filename order on every boot. Every statement is idempotent, so this is a no-op
+against an already-current database — deploying is just a restart, and nobody
+has to remember to run `psql`.
 
 ```
-supabase/01_schema.sql      tables, enums, indexes
-supabase/02_functions.sql   business logic, RPCs, audit triggers
-supabase/03_policies.sql    row-level security
-supabase/04_storage.sql     private attachment bucket + policies
-supabase/05_cr01.sql        CR-01: stakeholder-raised tasks
-supabase/06_cr01_delete.sql CR-01: permanent delete
-supabase/07_cr02.sql        CR-02: promised-date approval, notifications
+backend/sql/00_compat.sql      auth.uid() + the `authenticated` role  ← run first
+backend/sql/01_schema.sql      tables, enums, indexes
+backend/sql/02_functions.sql   business logic, RPCs, audit triggers
+backend/sql/03_policies.sql    row-level security
+backend/sql/05_cr01.sql        CR-01: stakeholder-raised tasks
+backend/sql/06_cr01_delete.sql CR-01: permanent delete
+backend/sql/07_cr02.sql        CR-02: promised-date approval, notifications
+backend/sql/08_grants.sql      privileges for `authenticated`  ← run last
 ```
 
-Apply via the Supabase SQL editor, or the Management API:
+**Order is load-bearing.** `00_compat` defines the identity function and the
+role that everything after it references; `08_grants` needs every table to
+exist. CI checks the numbering is unique so two people cannot both add an `09_`,
+and applies every file **twice** against a scratch database to prove the
+idempotence this design depends on.
 
-```bash
-curl -X POST "https://api.supabase.com/v1/projects/$REF/database/query" \
-  -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  --data-binary @<(python -c "import json,sys;print(json.dumps({'query':open(sys.argv[1]).read()}))" supabase/01_schema.sql)
+> There is no `04_`. That file created the Supabase Storage bucket and its
+> policies; S3 replaced it. The gap is deliberate — renumbering would have
+> changed the reviewed filenames of everything after it.
+
+### The database user
+
+The account the backend connects as must be able to `SET ROLE authenticated`.
+`00_compat.sql` grants that to whoever applies it, which is the same account, so
+this normally takes care of itself. If you later point the backend at a
+*different* user from the one that ran the migrations, grant it explicitly:
+
+```sql
+grant authenticated to <the_backend_user>;
 ```
 
-**Order matters.** Later files depend on helpers defined earlier
-(`is_executive()`, `_audit()`, `is_self_created()`). CI checks the numbering is
-unique so two people cannot both add an `08_`.
-
-### Edge Function
-
-One function, for stakeholder invites. It exists so the service-role key never
-reaches a browser: it verifies the caller's JWT and role server-side first.
-
-```bash
-supabase functions deploy create-stakeholder
-```
+Without it, every request fails with a permission error on `SET ROLE`.
 
 ---
 
-## 3. Auth configuration
+## 3. Cognito
 
-In **Supabase → Authentication → URL Configuration**, set the site URL and
-redirect allow-list to the UAT/production hostname, or invite and
-password-reset links will point at the wrong host:
+Two things to get right, and both have a failure mode that looks like something
+else:
 
-```
-Site URL:      https://ceo.gyftr.net
-Redirect URLs: https://ceo.gyftr.net, https://ceo.gyftr.net/**
-```
+1. **The app client must have no client secret.** With one, sign-in fails with
+   an opaque `NotAuthorizedException` that looks like a wrong password.
+2. **Email delivery must be configured** (SES out of the sandbox, or the pool's
+   built-in sender) before onboarding real people. Without it, invitations do
+   not arrive.
 
-### SMTP — required before onboarding real people
+The app degrades honestly rather than silently: when the invitation cannot be
+sent, `POST /api/admin/stakeholders` creates the account with a temporary
+password and tells the EA exactly why, instead of claiming an email went out.
+But that means passwords are handed over by hand.
 
-**This is currently not configured, and it blocks real onboarding.** Supabase's
-built-in sender is capped at roughly 2 emails per hour and only reliably
-delivers to team members, so invite emails do not arrive.
-
-The application degrades honestly rather than silently: when the invite cannot
-be sent it creates the account with a temporary password and tells the EA
-exactly why, instead of claiming an email went out. But that means passwords are
-handed over by hand.
-
-Configure SMTP in **Supabase → Authentication → Emails**, then:
-
-```bash
-cd scripts && node onboard.mjs --apply
-```
-
-Everyone receives an individual invite link and sets their own password.
+New accounts are created in `FORCE_CHANGE_PASSWORD`, so the temporary value is
+single-use and everyone picks their own password before reaching the board.
+**This gate is in the token issuer, not the app** — there is no session at all
+until the password is set, which is a real improvement on what it replaced.
 
 ---
 
@@ -174,7 +200,7 @@ node onboard.mjs --apply
 touches tasks and never resets an existing person's password, so it is the safe
 one to run against a database that already holds real work.
 
-`scripts/roster.json` is **gitignored** — this repository is public and a
+`scripts/roster.json` is **gitignored** — this repository is public, and a
 directory of working corporate addresses is what gets scraped for phishing. See
 `scripts/roster.example.json`.
 
@@ -183,18 +209,27 @@ directory of working corporate addresses is what gets scraped for phishing. See
 ## 5. Verify a release
 
 ```bash
-npm run test:security   # 41 tests against the REAL database, using the anon key
+npm run test:unit       # 28 tests — no database needed, runs in CI on every push
+npm run test:security   # 41 tests against a REAL database, through the RLS path
+npm run test:api        # Cognito, S3 and onboarding against a DEPLOYED stack
 ```
 
-These sign in as real users with the anon key — the same surface a browser has —
-and assert the **server** refuses what it should. The service role appears only
-to build fixtures and to check what actually landed. Run them against UAT after
-any change to RLS, the RPCs or the migrations.
+`test:security` runs every statement through `set local role authenticated` with
+`app.user_id` set — byte for byte what `withUser()` does in production. A pass
+means the **server** refused, not that a button was hidden. Run it against UAT
+after any change to the policies, the RPCs or the migrations.
+
+`test:api` needs a reachable API, Cognito pool and bucket, and **skips itself**
+when those are not configured. It covers the four things the database suite
+cannot: sign-in, forged tokens, the invite flow, and the attachment byte round
+trip — including that a non-assignee is refused a download URL, which is the one
+guarantee that left the database when Supabase Storage became S3.
 
 Then in a browser:
 
 - [ ] Sign in as the EA; the dashboard loads with data
 - [ ] Sign in as a stakeholder; they see only their own assignments
+- [ ] A brand-new account is forced to set a password before reaching the board
 - [ ] A deep link (`/#task/123`) opens the drawer after a hard refresh — this is
       what proves `serve -s` is rewriting correctly
 - [ ] The header is not clipped at 1280px wide (HANDOVER §9)
@@ -203,10 +238,19 @@ Then in a browser:
 
 ## Rollback
 
-The image is immutable and tagged `v1.$CODEBUILD_BUILD_NUMBER`. Roll back by
+Images are immutable and tagged `v1.$CODEBUILD_BUILD_NUMBER`. Roll back by
 pointing the ECS service at the previous task definition revision — no rebuild.
 
+**Roll the two services back together.** They are versioned independently but
+released as a pair, and a frontend expecting an endpoint an older backend does
+not serve will fail in ways that look like a data problem.
+
 **Database migrations do not roll back.** They are additive and idempotent, but
-`07_cr02.sql` drops the `saved_views` table, and `06_cr01_delete.sql` introduces
-permanent deletion. If you need to revert past those, restore from a Supabase
-backup rather than trying to undo them by hand.
+`07_cr02.sql` drops the `saved_views` table and `06_cr01_delete.sql` introduces
+permanent deletion. To revert past those, restore from an RDS snapshot rather
+than trying to undo them by hand.
+
+Note that rolling the backend image back also rolls `backend/sql/` back, and the
+old image re-applies its own migrations on boot. That is safe for additive
+changes and is **not** safe for a change that dropped something. Take a snapshot
+before any release that touches `backend/sql/`.

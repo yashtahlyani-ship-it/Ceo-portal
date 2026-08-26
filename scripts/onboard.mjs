@@ -21,7 +21,14 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { admin } from './lib.mjs';
+import {
+  db, cognito, USER_POOL_ID, hasCognito,
+} from './lib.mjs';
+import {
+  AdminCreateUserCommand,
+  AdminSetUserPasswordCommand,
+  AdminGetUserCommand,
+} from '@aws-sdk/client-cognito-identity-provider';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APPLY = process.argv.includes('--apply');
@@ -97,10 +104,44 @@ if (problems.length) {
   process.exit(1);
 }
 
+// Does this person already have a Cognito account? Asked per person rather than
+// by listing the whole pool: ListUsers pages at 60 and the old supabase-js call
+// silently assumed one page of 1000 would cover everyone, which would have
+// started mis-reporting people as "new" — and resetting their password — the
+// moment the pool outgrew a page.
+async function cognitoSubFor(email) {
+  if (!hasCognito) return null;
+  try {
+    const res = await cognito.send(new AdminGetUserCommand({ UserPoolId: USER_POOL_ID, Username: email }));
+    return res.UserAttributes?.find(a => a.Name === 'sub')?.Value ?? null;
+  } catch (err) {
+    if (err.name === 'UserNotFoundException') return null;
+    throw err;
+  }
+}
+
+async function upsertProfile({ sub, email, name, title, role, mustSetPassword }) {
+  await db.query(
+    `insert into profiles (cognito_sub, email, name, title, role, active, must_set_password)
+     values ($1,$2,$3,$4,$5,true,$6)
+     on conflict (email) do update
+        set name              = excluded.name,
+            title             = excluded.title,
+            role              = excluded.role,
+            active            = true,
+            must_set_password = excluded.must_set_password,
+            cognito_sub       = coalesce(excluded.cognito_sub, profiles.cognito_sub)`,
+    [sub, email, name, title || null, role, mustSetPassword]
+  );
+}
+
 // ── Report, then (optionally) act ────────────────────────────────────────────
 async function main() {
-  const { data: existingList } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-  const existing = new Map(existingList.users.map((u) => [u.email?.toLowerCase(), u]));
+  if (!hasCognito) {
+    console.error('COGNITO_USER_POOL_ID is not set — this would create profile rows with no');
+    console.error('accounts behind them, and nobody could sign in. Set it in ../.env.');
+    process.exit(1);
+  }
 
   console.log(`\n${APPLY ? 'Onboarding' : 'DRY RUN —'} ${people.length} people\n`);
   const results = [];
@@ -109,51 +150,84 @@ async function main() {
     const email = p.email.trim().toLowerCase();
     const name = p.name.trim();
     const title = (p.title || '').trim();
-    const already = existing.get(email);
+    const existingSub = await cognitoSubFor(email);
+    let inviteError = null;   // set if the email path was tried and failed
 
     if (!APPLY) {
-      console.log(`  ${already ? 'update' : 'create'}  ${email.padEnd(32)} ${name} · ${title || '—'} [${p.role}]`);
+      console.log(`  ${existingSub ? 'update' : 'create'}  ${email.padEnd(32)} ${name} · ${title || '—'} [${p.role}]`);
       continue;
     }
 
-    if (already) {
+    if (existingSub) {
       // Never reset a password for someone who already has an account — they may
       // already be using it. Only bring name/title/role up to date.
-      await admin.from('profiles').upsert({ id: already.id, email, name, title, role: p.role, active: true });
+      await upsertProfile({ sub: existingSub, email, name, title, role: p.role, mustSetPassword: false });
       results.push({ email, name, outcome: 'updated (password untouched)' });
       continue;
     }
 
-    const meta = { name, role: p.role, title };
-    const invite = SHARED
-      ? { error: { message: 'shared-password mode: no invite sent' } }
-      : await admin.auth.admin.inviteUserByEmail(email, { data: meta });
-    if (!invite.error && invite.data?.user) {
-      await admin.from('profiles').upsert({
-        id: invite.data.user.id, email, name, title, role: p.role, active: true,
-      });
-      results.push({ email, name, outcome: 'invited by email' });
-      continue;
+    // Preferred path: Cognito emails the invitation itself and the account
+    // stays in FORCE_CHANGE_PASSWORD, so the temporary value is single-use.
+    if (!SHARED) {
+      try {
+        const created = await cognito.send(new AdminCreateUserCommand({
+          UserPoolId: USER_POOL_ID,
+          Username: email,
+          DesiredDeliveryMediums: ['EMAIL'],
+          UserAttributes: [
+            { Name: 'email',          Value: email },
+            { Name: 'email_verified', Value: 'true' },
+            { Name: 'name',           Value: name },
+          ],
+        }));
+        const sub = created.User?.Attributes?.find(a => a.Name === 'sub')?.Value ?? null;
+        await upsertProfile({ sub, email, name, title, role: p.role, mustSetPassword: true });
+        results.push({ email, name, outcome: 'invited by email' });
+        continue;
+      } catch (err) {
+        // Fall through to a printed password. Onboarding should not be blocked
+        // because SES is still in the sandbox or a sender is unverified — but
+        // the person running this is told which happened, per person, rather
+        // than the script claiming an email went out that did not.
+        inviteError = err.message;
+      }
     }
 
     const pw = SHARED ? process.env.DEMO_PASSWORD : tempPassword();
     if (SHARED && !pw) { console.error('--shared-password needs DEMO_PASSWORD in ../.env'); process.exit(1); }
-    const created = await admin.auth.admin.createUser({
-      email, password: pw, email_confirm: true,
-      user_metadata: { ...meta, must_set_password: !SHARED },
-    });
-    if (created.error) {
-      results.push({ email, name, outcome: `FAILED: ${created.error.message}` });
-      continue;
+
+    try {
+      const created = await cognito.send(new AdminCreateUserCommand({
+        UserPoolId: USER_POOL_ID,
+        Username: email,
+        MessageAction: 'SUPPRESS',
+        TemporaryPassword: pw,
+        UserAttributes: [
+          { Name: 'email',          Value: email },
+          { Name: 'email_verified', Value: 'true' },
+          { Name: 'name',           Value: name },
+        ],
+      }));
+      const sub = created.User?.Attributes?.find(a => a.Name === 'sub')?.Value ?? null;
+
+      if (SHARED) {
+        // Permanent, so the shared password signs straight in with no
+        // first-login challenge. This is the evaluation-only path.
+        await cognito.send(new AdminSetUserPasswordCommand({
+          UserPoolId: USER_POOL_ID, Username: email, Password: pw, Permanent: true,
+        }));
+      }
+
+      await upsertProfile({ sub, email, name, title, role: p.role, mustSetPassword: !SHARED });
+      results.push({
+        email, name,
+        outcome: SHARED ? 'created with the shared password' : 'temporary password (invite email failed)',
+        password: SHARED ? null : pw,
+        reason: inviteError ?? undefined,
+      });
+    } catch (err) {
+      results.push({ email, name, outcome: `FAILED: ${err.message}` });
     }
-    await admin.from('profiles').upsert({
-      id: created.data.user.id, email, name, title, role: p.role, active: true,
-    });
-    results.push({
-      email, name,
-      outcome: SHARED ? 'created with the shared password' : 'temporary password (invite email failed)',
-      password: SHARED ? null : pw, reason: invite.error?.message,
-    });
   }
 
   if (!APPLY) {
@@ -173,4 +247,6 @@ async function main() {
   }
 }
 
-main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
+main()
+  .then(async () => { await db.end(); process.exit(0); })
+  .catch(async (e) => { console.error(e); await db.end().catch(() => {}); process.exit(1); });

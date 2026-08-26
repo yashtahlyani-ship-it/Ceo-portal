@@ -10,9 +10,12 @@ npm-debug.log
 .vscode
 .idea
 *.md
-supabase
-scripts
-tests
-infra
-.vercel
 *.local
+
+# NOTE: public/ is deliberately NOT ignored. It carries serve.json, which sets
+# the security response headers on the running container — and losing those
+# would be silent: the site still works, nothing fails, the headers are just
+# gone. See the comment in frontend/Dockerfile.
+#
+# (The build context is ./frontend, so backend/, scripts/, tests/ and infra/
+# are already outside it and need no entry here.)

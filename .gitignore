@@ -2,16 +2,17 @@ node_modules
 dist
 dist-ssr
 *.local
+.DS_Store
+.vite
+
+# Every env file, in every directory (root, frontend/, backend/).
+# This repository is PUBLIC — a committed secret must be rotated, not just
+# reverted, because the commit stays in the history and in every clone.
 .env
 .env.*
 !.env.example
-.DS_Store
-.vercel
-.vite
-
-.vercel
-.env*
 
 # The real team roster (names + working corporate emails).
-# Gitignored deliberately: this repository is PUBLIC.
+# Gitignored deliberately: a directory of live addresses is what gets scraped
+# for phishing. See scripts/roster.example.json.
 scripts/roster.json

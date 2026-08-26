@@ -1,16 +1,27 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { supabase } from '../lib/supabase.js';
+import * as cognito from '../lib/cognito.js';
+import { setOnSessionExpired } from '../lib/http.js';
 import { api } from '../lib/api.js';
 
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
 
-// A freshly created stakeholder is stamped with must_set_password:true in their
-// auth user_metadata (see scripts/create-stakeholder.mjs). Their first sign-in
-// succeeds, but the app holds them on the "set your password" step until they
-// choose their own — the same shape as the Marketing and Legal portals' Cognito
-// NEW_PASSWORD_REQUIRED challenge, expressed in Supabase terms.
-const needsPassword = (sess) => !!sess?.user?.user_metadata?.must_set_password;
+// ── The first-login gate ─────────────────────────────────────────────────────
+//
+// This used to read a `must_set_password` flag out of Supabase user metadata
+// and trust the app to act on it. That is a client-side gate, and it failed the
+// way client-side gates fail: the server stamped the flag correctly, a test
+// asserted it was stamped, and App.jsx rendered the board anyway because it
+// only checked for a missing session. Every new user walked straight past it.
+//
+// With Cognito the gate is in the token issuer. A fresh account is in
+// FORCE_CHANGE_PASSWORD and authenticateUser answers with a challenge INSTEAD
+// of a session, so `mustSetPassword` below is not a flag we choose to honour —
+// it is the report that no token exists yet. Forgetting to render the
+// set-password screen now leaves nothing to render the board with either.
+//
+// The exported shape is unchanged from the Supabase version on purpose, so
+// Login.jsx and App.jsx did not have to change.
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(undefined); // undefined = still resolving
@@ -18,48 +29,70 @@ export function AuthProvider({ children }) {
   const [mustSetPassword, setMustSetPassword] = useState(false);
 
   const loadProfile = useCallback(async () => {
-    try { setProfile(await api.me()); } catch { setProfile(null); }
+    try {
+      const me = await api.me();
+      setProfile(me);
+      return me;
+    } catch (err) {
+      // A valid Cognito token with no linked profile is a real state — someone
+      // in the user pool the CEO Office has not onboarded. Surfacing it beats
+      // an empty board that looks like a loading failure.
+      console.warn('[auth] could not load profile:', err.message);
+      setProfile(null);
+      return null;
+    }
   }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      if (data.session) { setMustSetPassword(needsPassword(data.session)); loadProfile(); }
+    let cancelled = false;
+
+    // A 401 from any request means the refresh token is gone or revoked. Drop
+    // the session so the app falls back to the sign-in screen rather than
+    // showing a board that can no longer load anything.
+    setOnSessionExpired(() => {
+      if (cancelled) return;
+      setSession(null);
+      setProfile(null);
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((event, sess) => {
-      setSession(sess);
-      if (sess) {
-        // PASSWORD_RECOVERY fires when someone follows an invite or reset link;
-        // the metadata flag covers the admin-created temporary-password case.
-        if (event === 'PASSWORD_RECOVERY' || needsPassword(sess)) setMustSetPassword(true);
-        loadProfile();
+
+    cognito.restoreSession().then(async (ok) => {
+      if (cancelled) return;
+      if (ok) {
+        setSession({ active: true });
+        await loadProfile();
       } else {
-        setProfile(null);
-        setMustSetPassword(false);
+        setSession(null);
       }
     });
-    return () => sub.subscription.unsubscribe();
+
+    return () => { cancelled = true; setOnSessionExpired(null); };
   }, [loadProfile]);
 
   const signIn = async (email, password) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-  };
-
-  // Sets the password AND clears the first-login flag in one call, so a refresh
-  // mid-flow cannot strand someone on the set-password screen forever.
-  const setPassword = async (newPassword) => {
-    const { error } = await supabase.auth.updateUser({
-      password: newPassword,
-      data: { must_set_password: false },
-    });
-    if (error) throw error;
+    const result = await cognito.signIn(email, password);
+    if (result.mustChangePassword) {
+      // No session exists yet — deliberately not setting one. Login.jsx shows
+      // the set-password step off the back of this flag.
+      setMustSetPassword(true);
+      return;
+    }
+    setSession({ active: true });
     setMustSetPassword(false);
     await loadProfile();
   };
 
+  // Completes the Cognito challenge AND establishes the session in one call, so
+  // a refresh mid-flow cannot strand somebody on the set-password screen.
+  const setPassword = async (newPassword) => {
+    await cognito.completeNewPassword(newPassword);
+    setMustSetPassword(false);
+    setSession({ active: true });
+    await loadProfile();
+  };
+
   const signOut = async () => {
-    await supabase.auth.signOut();
+    cognito.signOut();
+    setSession(null);
     setProfile(null);
     setMustSetPassword(false);
   };
@@ -68,6 +101,7 @@ export function AuthProvider({ children }) {
     <AuthCtx.Provider value={{
       session, profile, mustSetPassword, setMustSetPassword,
       signIn, setPassword, signOut, reloadProfile: loadProfile,
+      authConfigError: cognito.AUTH_CONFIG_ERROR,
     }}>
       {children}
     </AuthCtx.Provider>

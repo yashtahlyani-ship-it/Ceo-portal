@@ -9,25 +9,50 @@ import { GyftrLogo } from './GyftrLogo.jsx';
 
 /* Supabase's raw messages are terse and occasionally misleading. Translate the
    ones people actually hit; pass anything else through unchanged. */
+/* Cognito reports failures as exception names and terse sentences — mapped here
+   so nobody is shown raw AWS text.
+
+   `NotAuthorizedException` deliberately covers BOTH a wrong password and a
+   non-existent account, and both are answered with the same sentence. That is
+   not laziness: distinguishing them turns the login form into an account
+   enumeration oracle, letting anyone confirm which addresses hold accounts.
+   Cognito can be configured to leak this; do not help it. */
 function friendlyAuthError(err) {
   const raw = err?.message || 'Sign in failed';
-  const m = raw.toLowerCase();
-  if (m.includes('invalid login credentials')) return 'Incorrect email or password.';
-  if (m.includes('email not confirmed')) return 'This account is not active yet. Contact the CEO’s Office.';
-  if (m.includes('too many requests') || m.includes('rate limit')) {
+  const name = err?.name || '';
+  const m = (name + ' ' + raw).toLowerCase();
+
+  if (m.includes('notauthorized') || m.includes('incorrect username or password')
+      || m.includes('usernotfound') || m.includes('user does not exist')) {
+    return 'Incorrect email or password.';
+  }
+  if (m.includes('passwordresetrequired')) {
+    return 'Your password needs to be reset. Contact the CEO’s Office.';
+  }
+  if (m.includes('usernotconfirmed')) {
+    return 'This account is not active yet. Contact the CEO’s Office.';
+  }
+  if (m.includes('toomanyrequests') || m.includes('limitexceeded')
+      || m.includes('attempt limit exceeded') || m.includes('rate limit')) {
     return 'Too many attempts. Wait a few minutes and try again.';
   }
-  if (m.includes('should be different from the old password')) {
+  if (m.includes('invalidpassword') || m.includes('did not conform with policy')) {
+    return 'That password does not meet the requirements below.';
+  }
+  if (m.includes('should be different from the old password')
+      || m.includes('same as the previous')) {
     return 'Choose a password different from your temporary one.';
   }
-  if (m.includes('failed to fetch') || m.includes('networkerror')) {
+  if (m.includes('failed to fetch') || m.includes('networkerror')
+      || m.includes('could not reach the server')) {
     return 'Could not reach the server. Check your connection and try again.';
   }
   return raw;
 }
 
-/* Mirrors the Supabase project's password policy so the user is told what is
-   wrong before the request round-trips. */
+/* Mirrors the Cognito user pool's password policy so the user is told what is
+   wrong before the request round-trips. Keep these in step with the pool — see
+   infra/aws-setup.md §3. */
 const RULES = [
   { label: 'At least 8 characters', test: (p) => p.length >= 8 },
   { label: 'One uppercase letter',  test: (p) => /[A-Z]/.test(p) },
@@ -149,7 +174,7 @@ function SetPassword({ email, setPassword, onCancel }) {
 
 /* ── Step 1: sign in ── */
 export default function Login() {
-  const { signIn, signOut, mustSetPassword, setPassword } = useAuth();
+  const { signIn, signOut, mustSetPassword, setPassword, authConfigError } = useAuth();
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
   const [err, setErr] = useState('');
@@ -175,6 +200,20 @@ export default function Login() {
         <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', margin: '0 0 22px' }}>
           Every request from the CEO&apos;s Office, who owns it, and what they promised.
         </p>
+
+        {/* A build made without VITE_COGNITO_* cannot sign anybody in. Without
+            this banner the symptom is a password that "stops working" for
+            everyone at once, which sends people looking in entirely the wrong
+            place. Say what is actually wrong, to whoever can act on it. */}
+        {authConfigError && (
+          <div role="alert" style={{
+            fontSize: 12.5, lineHeight: 1.5, color: '#C42424', background: '#FDE2E2',
+            border: '1px solid #F5C2C2', borderRadius: 10, padding: '10px 12px', marginBottom: 16,
+          }}>
+            <strong>This deployment is misconfigured.</strong> {authConfigError}
+          </div>
+        )}
+
         <form onSubmit={submit}>
           <label htmlFor="username" style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-soft)' }}>Company email</label>
           <input className="gx-input" style={{ margin: '6px 0 14px' }} type="email"

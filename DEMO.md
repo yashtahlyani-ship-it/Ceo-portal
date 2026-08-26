@@ -1,6 +1,6 @@
 # Demo
 
-**Live:** https://gyftr-ceo-portal.vercel.app
+**Live:** https://ceo.gyftr.net
 **Local:** `npm run dev:frontend`
 
 ---
@@ -16,9 +16,10 @@ Every account signs in with:
 > across the whole company means one leak exposes every account. It is set this
 > way so the team can evaluate without friction, nothing more.
 >
-> The fix is already built: configure SMTP in **Supabase → Authentication →
-> Emails**, then run `cd scripts && node onboard.mjs --apply`. Everyone gets an
-> individual email invite and sets their own password; no shared secret survives.
+> The fix is already built: take SES out of the sandbox, point the Cognito user
+> pool at it, then run `cd scripts && node onboard.mjs --apply`. Everyone gets
+> an individual email invitation and sets their own password, and no shared
+> secret survives.
 
 ### Who is in the tool
 

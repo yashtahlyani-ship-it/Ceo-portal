@@ -10,7 +10,11 @@ reuses that portal's design system verbatim — same fonts, same palette, same
 information architecture and workflow built for executive delegation rather than
 creative production.
 
-**Live:** https://gyftr-ceo-portal.vercel.app
+**Live:** https://ceo.gyftr.net · **API:** https://ceo-api.gyftr.net
+
+> **August 2026 — this platform moved to AWS.** Supabase and Vercel are gone;
+> it now runs on ECS, RDS, Cognito and S3 alongside the Marketing and Legal
+> portals. See [the migration note](#the-aws-migration) below.
 
 ---
 
@@ -47,19 +51,49 @@ portals, so anyone who has worked on those can navigate this without a tour.
 
 ```
 frontend/          React + Vite app, its Dockerfile and CodeBuild buildspec
-supabase/          the data layer — schema, RLS, RPCs, Edge Function
+backend/           Express API, its Dockerfile and buildspec
+backend/sql/       the data layer — schema, RLS policies, RPCs, audit triggers
 scripts/           admin scripts: seed, onboard, create-stakeholder
-tests/             unit + live integration tests
+tests/             unit, route-safety, database and API integration tests
 infra/             first-time AWS provisioning
 .github/workflows/ CI
-docker-compose.yml single-host / local run
+docker-compose.yml frontend + backend + a local Postgres
 ```
 
-**There is no `backend/`.** The siblings ship a Node/Express API; this product's
-API, authorisation and storage live inside Postgres on Supabase. That is the one
-deliberate divergence in the family — see
-[PROJECT_PLAN.md](PROJECT_PLAN.md#stack-decision) for the reasoning and
-[DEPLOY.md](DEPLOY.md) for what it means on AWS.
+---
+
+## The AWS migration
+
+Until August 2026 this product used Supabase for its data layer and deployed to
+Vercel — the one deliberate divergence in the portal family. It now matches its
+siblings: ECS Fargate, RDS Postgres, Cognito, S3.
+
+**One thing did not converge, and it was kept on purpose.** Marketing and Legal
+enforce authorization in Express middleware. This product enforces it in
+PostgreSQL **Row-Level Security**, because its central requirement is that one
+stakeholder can never see a co-assignee's status, promised date or comments.
+Expressed as a row predicate, that holds on every query path — including ones
+nobody has written yet.
+
+RLS is a PostgreSQL feature, not a Supabase one, so it moved across untouched:
+the same 19 policies, the same 25 functions, the same 41 security tests. What
+had to be recreated was the two Supabase-specific things they lean on —
+`auth.uid()` and the `authenticated` role — and that is what
+[`backend/sql/00_compat.sql`](backend/sql/00_compat.sql) does, in about thirty
+lines. It is the best-commented file in the repository and the right place to
+start reading.
+
+The practical rule for anyone adding an endpoint:
+
+```js
+// Correct — RLS decides what comes back.
+await withUser(req.profile.id, c => c.query('select * from tasks'));
+
+// WRONG — runs as the table owner and bypasses every policy in the schema.
+await query('select * from tasks');
+```
+
+`npm run test:unit` fails if a route does the second one.
 
 ---
 
@@ -71,60 +105,54 @@ Chosen to match the existing internal ecosystem rather than by preference:
 - **lucide-react** icons — same library, same version
   (the Marketing Portal also uses Recharts; this product renders no charts, so
   the dependency is not carried. Add it back if a chart view lands.)
-- **Supabase** (Postgres + Auth + Storage + Edge Functions) for the backend
-
-> **Why Supabase and not the Marketing Portal's Express + Cognito backend?**
-> See [PROJECT_PLAN.md](PROJECT_PLAN.md#stack-decision) — this is the one place
-> the two products deliberately diverge, and the reasoning is recorded there.
+- **Express + pg** on ECS Fargate (arm64) — same shape as both siblings
+- **RDS PostgreSQL 16**, **AWS Cognito**, **private S3 bucket**
 
 ---
 
 ## Running locally
 
+The whole stack, including a throwaway Postgres, exactly as it ships:
+
 ```bash
-npm run install:all                            # frontend + scripts
-cp .env.example .env                           # from Supabase → Settings → API
-cp frontend/.env.example frontend/.env.local
-npm run dev:frontend                           # http://localhost:5173
+cp .env.example .env          # fill in the Cognito values
+docker compose up --build     # frontend :7868 · backend :7869 · postgres :5442
 ```
 
-Or the real container, exactly as it ships to AWS:
+Or the frontend alone against a running API:
 
 ```bash
-docker compose up --build                      # http://localhost:7868
+npm run install:all
+cp frontend/.env.example frontend/.env.local
+npm run dev:frontend          # http://localhost:5173
 ```
 
 ### Environment variables
 
 | Variable | Where | Purpose |
 |---|---|---|
-| `VITE_SUPABASE_URL` | `.env.local` (browser) | Supabase project URL |
-| `VITE_SUPABASE_ANON_KEY` | `.env.local` (browser) | Anon key. Safe to expose — **security is enforced by RLS, never by hiding this key** |
-| `SUPABASE_SERVICE_ROLE_KEY` | `.env` (server only) | Bypasses RLS. Used **only** by `scripts/` and the integration tests. Never ships to the browser |
+| `VITE_API_URL` | frontend build | Where the browser sends requests |
+| `VITE_COGNITO_USER_POOL_ID` | frontend build | Which pool to authenticate against |
+| `VITE_COGNITO_CLIENT_ID` | frontend build | App client — **must have no client secret** |
+| `AWS_SECRET_NAME` *or* `DB_*` | backend runtime | Database credentials |
+| `COGNITO_USER_POOL_ID` / `COGNITO_CLIENT_ID` | backend runtime | Token verification |
+| `ATTACHMENTS_BUCKET` | backend runtime | Private S3 bucket |
+| `FRONTEND_URL` | backend runtime | CORS allow-list — never `*` |
 
-Both files are gitignored.
+The three `VITE_` values are **public by design**: an address and two
+identifiers, shipped in a file every visitor downloads. They grant nothing.
+Security is the Cognito signature check and the RLS policies behind it. A client
+*secret*, an AWS key or a database password must never appear among them — CI
+greps the built bundle and fails if one does.
+
+All `.env` files are gitignored.
 
 ### First-time database setup
 
-Run the migrations in order against your Supabase project (SQL Editor, or the
-Management API):
-
-```
-supabase/01_schema.sql      tables, enums, indexes
-supabase/02_functions.sql   business logic, RPCs, audit triggers
-supabase/03_policies.sql    row-level security
-supabase/04_storage.sql     private attachment bucket + its policies
-supabase/05_cr01.sql        CR-01: stakeholder-raised tasks (see CHANGELOG)
-supabase/06_cr01_delete.sql CR-01: permanent delete
-supabase/07_cr02.sql        CR-02: promised-date approval, notifications
-```
-
-Then deploy the Edge Function that lets the EA/CEO add stakeholders from inside
-the app without the service-role key ever reaching a browser:
-
-```bash
-supabase functions deploy create-stakeholder
-```
+**There isn't one.** `backend/db.js` applies `backend/sql/*.sql` in filename
+order on every boot, and every statement is idempotent — so the database builds
+itself the first time the backend starts and re-applying is a no-op. Deploying
+is just a restart.
 
 ### Demo data
 
@@ -142,19 +170,27 @@ employee data. See [DEMO.md](DEMO.md) for logins and the walkthrough.
 ## Commands
 
 ```bash
-npm run dev:frontend    # dev server
+npm run dev:frontend    # frontend dev server
+npm run dev:backend     # API with --watch
 npm run build:frontend  # production build
 npm run lint            # eslint
-npm run docker:up       # build + run the container on :7868
-npm test                # all tests (unit + live integration)
-npm run test:unit       # pure logic only, no network
-npm run test:security   # permission/workflow tests against the real database
+npm run docker:up       # the whole stack on :7868 / :7869
+npm test                # everything
+npm run test:unit       # pure logic + route safety — no database, runs in CI
+npm run test:security   # permission/workflow tests against a real database
+npm run test:api        # Cognito, S3 and onboarding against a deployed stack
 npm run seed            # demo data
 ```
 
-`npm test` runs **64 tests**: 23 unit tests over the pure rules, and 41
-integration tests that sign in as real users with the anon key and assert that
-the *server* refuses what it should. See [SECURITY.md](SECURITY.md).
+The suites, and what each is actually for:
+
+| Suite | Needs | Covers |
+|---|---|---|
+| `test:unit` | nothing | 23 tests over the pure rules the UI reads, plus 5 **route-safety** tests that fail if a handler bypasses RLS |
+| `test:security` | a Postgres database | 41 tests run through the same `set local role authenticated` path a live request takes — a pass means the **server** refused |
+| `test:api` | a deployed stack | sign-in, forged tokens, the invite flow, and the attachment byte round trip. **Skips itself** when not configured |
+
+See [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -162,27 +198,26 @@ the *server* refuses what it should. See [SECURITY.md](SECURITY.md).
 
 Two ways, both server-authorised:
 
-1. **In the app** — Stakeholders → *Add Stakeholder*. Calls the
-   `create-stakeholder` Edge Function, which verifies the caller is EA/CEO before
-   creating anything. A temporary password is shown once.
+1. **In the app** — Stakeholders → *Invite Stakeholder*. Calls
+   `POST /api/admin/stakeholders`, which checks the caller is EA/CEO before
+   creating anything, and whose profile write is independently refused by RLS
+   for anyone else.
 2. **From the CLI** —
    `cd scripts && node create-stakeholder.mjs "Priya Nair" priya@gyftr.net "Head of Product"`
 
-Either way the account is stamped `must_set_password`, so the person chooses
-their own password at first sign-in. Nothing hard-codes the number of
-stakeholders.
+Either way the Cognito account is created in `FORCE_CHANGE_PASSWORD`, so the
+person chooses their own password before reaching the board. **That gate is in
+the token issuer, not the app** — there is no session at all until the password
+is set, so a client that forgets to render the screen has nothing to render the
+board with either. Nothing hard-codes the number of stakeholders.
 
 ---
 
 ## Deployment
 
-Hosted on Vercel, built from `vercel.json` (SPA rewrites plus a small set of
-security headers). Environment variables are set for Production, Preview and
-Development.
-
-```bash
-vercel deploy --prod
-```
+Two ECS Fargate services behind an ALB, built by two CodeBuild projects. See
+[DEPLOY.md](DEPLOY.md) for the runbook and
+[infra/aws-setup.md](infra/aws-setup.md) for first-time provisioning.
 
 ---
 

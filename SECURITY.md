@@ -15,13 +15,24 @@ That is the case each control is written for, and the case the tests exercise.
 
 ## Authentication
 
-- Supabase email/password. **No public signup** — accounts are created only by
-  the `create-stakeholder` Edge Function or the admin scripts, both of which use
-  the service role *after* verifying the caller is EA or CEO.
-- New accounts are stamped `must_set_password: true`. The app holds them on the
-  password-set step until they choose their own; the flag is cleared in the same
-  `updateUser` call that sets the password, so a refresh mid-flow cannot strand
-  them.
+- AWS Cognito, email/password. **No public signup** — accounts are created only
+  by `POST /api/admin/stakeholders` or the admin scripts, both of which verify
+  the caller is EA or CEO first. The API's profile write is *additionally*
+  refused by RLS for anyone else, so removing the route's own check would not
+  open a hole.
+- Every request carries a Cognito ID token, verified with `aws-jwt-verify`
+  against the pool's public keys before anything else happens. `tests/api.test.mjs`
+  asserts that an unsigned token is refused — if that ever passes, verification
+  is not happening and every account is open.
+- New accounts are created in `FORCE_CHANGE_PASSWORD`, so Cognito issues a
+  `NEW_PASSWORD_REQUIRED` challenge **instead of a session**. There is no token
+  until the person sets their own password.
+
+  > This replaced a client-side gate, and the difference is not cosmetic. The
+  > previous design stamped a flag in user metadata and trusted the app to act
+  > on it; the app once did not, and every new user walked straight past the
+  > screen while the test asserting the flag was set kept passing. A gate in the
+  > token issuer cannot be skipped by a client that forgets to check.
 - A trigger on `auth.users` guarantees a `profiles` row exists, defaulting to
   `stakeholder`. Absent or tampered metadata can never mint an executive.
 - The **anon key is public by design**. It identifies the project, it does not
@@ -140,8 +151,14 @@ and anything a future feature does. Application code cannot forget to log.
 
 ## Input validation and injection
 
-- All access goes through the Supabase client, which sends **parameterised**
-  queries and RPC arguments. No string-concatenated SQL anywhere.
+- Every query in `backend/` uses **parameterised** placeholders (`$1`, `$2`).
+  The one place SQL is assembled from strings is the column list in
+  `PATCH /api/tasks/:id`, which is built from a hard-coded allow-list of five
+  column names, never from request data.
+- `withUser()` passes the identity as a **bind parameter**, never interpolated.
+  It arrives from a verified token so it is not attacker-controlled today, but a
+  string-built session variable that every policy trusts is not a pattern to
+  leave lying around for the next person to copy.
 - Server-side constraints: non-empty title, non-empty comment body, enum-typed
   status/priority/role, unique `(task_id, stakeholder_id)`.
 - React escapes all rendered text; there is no `dangerouslySetInnerHTML` in the
@@ -153,9 +170,22 @@ and anything a future feature does. Application code cannot forget to log.
 
 ## Transport and headers
 
-Supabase is HTTPS-only. `vercel.json` sets `X-Content-Type-Options: nosniff`,
-`X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin` and a
-`Permissions-Policy` denying camera, microphone and geolocation.
+Both ALB listeners are HTTPS with ACM certificates; RDS connections use TLS in
+production (`NODE_ENV=production`).
+
+CORS is an **explicit origin allow-list** built from `FRONTEND_URL`, never `*` —
+which would in any case be invalid alongside `credentials: true`.
+
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Referrer-Policy: strict-origin-when-cross-origin` and a `Permissions-Policy`
+denying camera, microphone and geolocation are set by
+`frontend/public/serve.json`, which Vite copies into `dist/` and `serve` reads
+from the directory it serves.
+
+> These were previously set by `vercel.json`. Retiring that file would have
+> dropped them silently — nothing breaks, no test fails, the protection is just
+> gone — so they were moved into the image, where they travel with the container
+> instead of with a hosting provider. Verified served on `GET /`.
 
 ---
 
@@ -191,12 +221,17 @@ Covered:
 
 ## Before real use
 
-1. **Rotate the demo password** (`DEMO_PASSWORD` in `.env`) and remove or re-seed the
-   `@demo.gyftr.net` accounts.
-2. **Rotate the Supabase and Vercel access tokens** used to provision this
-   project — they were shared in plaintext during setup.
-3. Consider restricting the deployment behind Vercel authentication or an IP
-   allow-list; the login page is currently publicly reachable (it grants nothing,
-   but it is visible).
-4. Confirm the Supabase project's password policy matches the rules shown on the
-   set-password screen (8+ chars, upper, lower, number, symbol).
+1. **Rotate the demo password** (`DEMO_PASSWORD` in `.env`) and remove or
+   re-seed the `@demo.gyftr.net` accounts.
+2. **Rotate the Supabase and Vercel access tokens** used during development.
+   Both were shared in plaintext during setup. The services are gone, but a live
+   token is a live token until it is revoked — and a Supabase access token can
+   still reach any project the account owns.
+3. **Confirm S3 Block Public Access** is on for all four settings. Attachment
+   bytes are protected *only* by the presigned-URL check in
+   `routes/attachments.js`; a readable bucket makes that check decorative.
+4. **Confirm the Cognito app client has no client secret**, and that the pool's
+   password policy matches the rules shown on the set-password screen (8+ chars,
+   upper, lower, number, symbol).
+5. Consider an IP allow-list or WAF in front of the ALB; the login page is
+   publicly reachable (it grants nothing, but it is visible).

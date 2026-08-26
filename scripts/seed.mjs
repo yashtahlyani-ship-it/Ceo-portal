@@ -10,11 +10,12 @@
 // accounts before any real use.
 //
 // This script RESETS first (clears demo data + @demo.gyftr.net accounts), so it
-// is deterministic and safe to re-run. Service role bypasses RLS.
+// is deterministic and safe to re-run. It connects as the database owner, so
+// Row-Level Security does not apply.
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { admin, ensureUser } from './lib.mjs';
+import { db, ensureUser, deleteUser, hasCognito } from './lib.mjs';
 
 // Read from .env (gitignored), never hard-coded — this repository is public and
 // these accounts are live on a publicly reachable deployment. See HANDOVER.md.
@@ -95,22 +96,25 @@ async function reset() {
   console.log('Resetting existing demo data…');
   // saved_views is gone as of CR-02 #1. notifications cascade from tasks, but
   // clearing them explicitly keeps a re-seed from leaving stale bell items.
+  //
+  // Order matters: children before parents, because these are plain DELETEs
+  // rather than a cascade from `tasks`, and audit_log holds references that
+  // would otherwise block the tasks delete.
   for (const t of ['audit_log', 'notifications', 'task_comments', 'task_attachments', 'task_assignments', 'tasks']) {
-    await admin.from(t).delete().gt('id', 0);
+    await db.query(`delete from ${t}`);
   }
-  // Delete @demo.gyftr.net auth users (profiles cascade on delete).
-  let page = 1;
-  for (;;) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
-    if (error || !data || data.users.length === 0) break;
-    for (const u of data.users) {
-      // Only ever removes accounts this script created — matched against the
-      // roster in use, so a re-seed cannot delete someone onboarded separately.
-      if (SEEDED_EMAILS.has(u.email?.toLowerCase())) await admin.auth.admin.deleteUser(u.id);
-    }
-    if (data.users.length < 200) break;
-    page++;
+
+  // Remove the accounts this script created, so a re-seed is deterministic.
+  //
+  // Driven by the roster rather than by listing the pool: only emails that ARE
+  // in the roster in use are deleted, so a re-seed can never remove somebody
+  // who was onboarded separately. (Listing and matching would give the same
+  // result but reads as "delete everything that looks like ours", which is one
+  // careless edit away from being true.)
+  if (hasCognito) {
+    for (const email of SEEDED_EMAILS) await deleteUser(email);
   }
+  await db.query('delete from profiles where lower(email) = any($1)', [[...SEEDED_EMAILS]]);
 }
 
 async function main() {
@@ -149,39 +153,60 @@ async function main() {
     const followup = Math.random() < 0.5 ? addDays(-2 + Math.floor(Math.random() * 10)) : null;
     const creator = Math.random() < 0.5 ? eaId : ceoId;
 
-    const { data: task } = await admin.from('tasks').insert({
-      title: `${pick(TITLES)}${i >= TITLES.length ? ' · ' + i : ''}`,
-      description: 'Executive request from the CEO Office. Detailed brief to follow in the attached documents.',
-      priority, expected_date: expected, next_followup_date: followup, created_by: creator,
-    }).select().single();
+    const { rows: [task] } = await db.query(
+      `insert into tasks (title, description, priority, expected_date, next_followup_date, created_by)
+       values ($1,$2,$3,$4,$5,$6) returning id`,
+      [
+        `${pick(TITLES)}${i >= TITLES.length ? ' · ' + i : ''}`,
+        'Executive request from the CEO Office. Detailed brief to follow in the attached documents.',
+        priority, expected, followup, creator,
+      ]
+    );
 
     const assignees = some(sh, 1 + Math.floor(Math.random() * 3));
     for (const a of assignees) {
       const status = pick(STATUSES);
-      const row = { task_id: task.id, stakeholder_id: a.id, status };
+      let proposed = null, promised = null, state = 'none', confirmedBy = null, confirmedAt = null;
       const pr = Math.random();
-      if (pr < 0.3) { row.promised_proposed = addDays(2 + Math.floor(Math.random() * 10)); row.promised_state = 'proposed'; }
-      else if (pr < 0.6) {
-        const pd = addDays(2 + Math.floor(Math.random() * 10));
-        row.promised_proposed = pd; row.promised_date = pd; row.promised_state = 'confirmed';
-        row.promised_confirmed_by = creator; row.promised_confirmed_at = new Date().toISOString();
+      if (pr < 0.3) {
+        proposed = addDays(2 + Math.floor(Math.random() * 10));
+        state = 'proposed';
+      } else if (pr < 0.6) {
+        proposed = promised = addDays(2 + Math.floor(Math.random() * 10));
+        state = 'confirmed';
+        confirmedBy = creator;
+        confirmedAt = new Date().toISOString();
       }
-      const { data: asg } = await admin.from('task_assignments').insert(row).select().single();
+
+      const { rows: [asg] } = await db.query(
+        `insert into task_assignments
+           (task_id, stakeholder_id, status, promised_proposed, promised_date,
+            promised_state, promised_confirmed_by, promised_confirmed_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8) returning id`,
+        [task.id, a.id, status, proposed, promised, state, confirmedBy, confirmedAt]
+      );
+
       if (asg && Math.random() < 0.5) {
-        await admin.from('task_comments').insert({
-          task_id: task.id, assignment_id: asg.id, author_id: a.id, author_role: 'stakeholder',
-          body: 'Started reviewing the brief — will share a plan shortly.',
-        });
+        await db.query(
+          `insert into task_comments (task_id, assignment_id, author_id, author_role, body)
+           values ($1,$2,$3,'stakeholder',$4)`,
+          [task.id, asg.id, a.id, 'Started reviewing the brief — will share a plan shortly.']
+        );
         if (Math.random() < 0.5) {
-          await admin.from('task_comments').insert({
-            task_id: task.id, assignment_id: asg.id, author_id: creator, author_role: creator === ceoId ? 'ceo' : 'ea',
-            body: 'Thanks. Please confirm your promised date by end of week.',
-          });
+          await db.query(
+            `insert into task_comments (task_id, assignment_id, author_id, author_role, body)
+             values ($1,$2,$3,$4,$5)`,
+            [task.id, asg.id, creator, creator === ceoId ? 'ceo' : 'ea',
+             'Thanks. Please confirm your promised date by end of week.']
+          );
         }
       }
     }
     if (Math.random() < 0.08) {
-      await admin.from('tasks').update({ archived: true, archived_at: new Date().toISOString(), archived_by: creator }).eq('id', task.id);
+      await db.query(
+        'update tasks set archived = true, archived_at = now(), archived_by = $2 where id = $1',
+        [task.id, creator]
+      );
     }
   }
   // CR-01 #6: a few tasks stakeholders raised for themselves, so a fresh
@@ -197,14 +222,18 @@ async function main() {
   for (let i = 0; i < SELF_RAISED.length; i++) {
     const owner = sh[i % sh.length];
     const [title, description] = SELF_RAISED[i];
-    const { data: task, error } = await admin.from('tasks').insert({
-      title, description, priority: pick(PRIORITIES),
-      expected_date: addDays(5 + i * 4),
-      created_by: owner.id,          // ← a stakeholder, so this reads as self-created
-    }).select().single();
-    if (error) throw error;
+    const { rows: [task] } = await db.query(
+      `insert into tasks (title, description, priority, expected_date, created_by)
+       values ($1,$2,$3,$4,$5) returning id`,
+      // created_by is a stakeholder, which is exactly what makes a task
+      // self-created — the app derives it, nothing is stored.
+      [title, description, pick(PRIORITIES), addDays(5 + i * 4), owner.id]
+    );
     // Exactly one assignment, to the person who raised it.
-    await admin.from('task_assignments').insert({ task_id: task.id, stakeholder_id: owner.id });
+    await db.query(
+      'insert into task_assignments (task_id, stakeholder_id) values ($1,$2)',
+      [task.id, owner.id]
+    );
   }
 
   console.log('✓ Seed complete.');
@@ -223,4 +252,6 @@ function printLogins() {
   }
 }
 
-main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
+main()
+  .then(async () => { await db.end(); process.exit(0); })
+  .catch(async (e) => { console.error(e); await db.end().catch(() => {}); process.exit(1); });

@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
 import { UserPlus, Users, Check, Copy, Mail } from 'lucide-react';
-import { supabase } from '../lib/supabase.js';
 import { api } from '../lib/api.js';
 import { roleLabel } from '../lib/format.js';
 import { Avatar, Modal, Field, Empty, Skeleton } from '../components/ui.jsx';
 
-// Executive-only. Directory + add stakeholder (via the create-stakeholder Edge
-// Function) + activate/deactivate. New people are addable without code changes.
+// Executive-only. Directory + invite stakeholder + activate/deactivate. New
+// people are addable without code changes.
 export default function Stakeholders() {
   const [rows, setRows] = useState(null);
   const [adding, setAdding] = useState(false);
@@ -15,7 +14,7 @@ export default function Stakeholders() {
   useEffect(() => { load(); }, []);
 
   const toggleActive = async (p) => {
-    await supabase.from('profiles').update({ active: !p.active }).eq('id', p.id);
+    await api.setProfileActive(p.id, !p.active);
     load();
   };
 
@@ -68,17 +67,12 @@ function AddModal({ onClose, onAdded }) {
   const submit = async (e) => {
     e.preventDefault(); setErr(''); setBusy(true);
     try {
-      const { data, error } = await supabase.functions.invoke('create-stakeholder', {
-        body: {
-          name: name.trim(), email: email.trim(), title: title.trim(),
-          // Where the invite link should land them. Must be in the project's
-          // redirect allow-list or Supabase refuses it.
-          redirectTo: window.location.origin,
-        },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      setResult(data);
+      // No redirectTo any more: Cognito sends the invitation itself from the
+      // user pool's configured message template, so the landing URL is pool
+      // configuration rather than something this form gets to choose.
+      setResult(await api.createStakeholder({
+        name: name.trim(), email: email.trim(), title: title.trim(),
+      }));
     } catch (e) { setErr(e.message || 'Could not create the account.'); }
     finally { setBusy(false); }
   };
