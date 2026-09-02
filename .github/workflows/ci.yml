@@ -115,16 +115,37 @@ jobs:
           docker run -d --name ci-pg -e POSTGRES_PASSWORD=ciplaceholder \
             -e POSTGRES_DB=gyftr_ceo -e POSTGRES_USER=gyftr_admin \
             -p 5432:5432 postgres:16-alpine
-          for i in $(seq 1 30); do
-            docker exec ci-pg pg_isready -U gyftr_admin -d gyftr_ceo && break
+
+          # Wait on a real query, not on pg_isready.
+          #
+          # The postgres entrypoint runs initdb against a TEMPORARY server on a
+          # unix socket, then shuts it down and starts the real one. pg_isready
+          # answers "accepting connections" during that window, so a migration
+          # started on its say-so gets killed mid-statement with
+          # "FATAL: terminating connection due to administrator command" —
+          # which looks exactly like a broken migration and is not.
+          #
+          # A successful SELECT over TCP only happens once the real server is up.
+          ready=0
+          for i in $(seq 1 60); do
+            if docker exec -e PGPASSWORD=$PGPASSWORD ci-pg \
+                 psql -h 127.0.0.1 -U gyftr_admin -d gyftr_ceo -c 'select 1' >/dev/null 2>&1; then
+              ready=1; break
+            fi
             sleep 1
           done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::Postgres never became ready"
+            docker logs ci-pg | tail -30
+            exit 1
+          fi
+          echo "Postgres ready after ${i}s"
           for pass in 1 2; do
             echo "── migration pass $pass ──"
             for f in backend/sql/*.sql; do
               echo "  $f"
               docker exec -i -e PGPASSWORD=$PGPASSWORD ci-pg \
-                psql -v ON_ERROR_STOP=1 -U gyftr_admin -d gyftr_ceo < "$f"
+                psql -h 127.0.0.1 -v ON_ERROR_STOP=1 -U gyftr_admin -d gyftr_ceo < "$f"
             done
           done
           echo "Migrations apply cleanly and are idempotent."
