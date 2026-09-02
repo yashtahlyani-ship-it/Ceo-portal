@@ -53,7 +53,7 @@ portals, so anyone who has worked on those can navigate this without a tour.
 frontend/          React + Vite app, its Dockerfile and CodeBuild buildspec
 backend/           Express API, its Dockerfile and buildspec
 backend/sql/       the data layer — schema, RLS policies, RPCs, audit triggers
-scripts/           admin scripts: seed, onboard, create-stakeholder
+scripts/           admin scripts: seed, onboard, invite, force-password-reset
 tests/             unit, route-safety, database and API integration tests
 infra/             first-time AWS provisioning
 .github/workflows/ CI
@@ -180,6 +180,15 @@ npm run test:unit       # pure logic + route safety — no database, runs in CI
 npm run test:security   # permission/workflow tests against a real database
 npm run test:api        # Cognito, S3 and onboarding against a deployed stack
 npm run seed            # demo data
+```
+
+Admin scripts (`scripts/`, direct Cognito + database access):
+
+```bash
+node seed.mjs                     # demo/UAT data — destructive, resets accounts
+node onboard.mjs [--apply]        # the real roster; never resets a password
+node create-stakeholder.mjs …     # one person
+node force-password-reset.mjs     # force everyone to choose a new password
 ```
 
 The suites, and what each is actually for:

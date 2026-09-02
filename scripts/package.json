@@ -7,7 +7,8 @@
   "scripts": {
     "seed": "node seed.mjs",
     "create-stakeholder": "node create-stakeholder.mjs",
-    "onboard": "node onboard.mjs"
+    "onboard": "node onboard.mjs",
+    "force-password-reset": "node force-password-reset.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.550.0",

@@ -110,6 +110,10 @@ npm run test:api        # Cognito/S3/onboarding against a DEPLOYED stack
 npm run seed            # (re)create demo accounts + demo tasks
 ```
 
+Admin scripts live in `scripts/` and talk to Cognito and the database directly:
+`seed.mjs`, `onboard.mjs`, `create-stakeholder.mjs`, `force-password-reset.mjs`
+(§7).
+
 **Run `npm run test:unit` before every push** — it needs nothing, takes a
 second, and catches the one migration-specific way to break this codebase.
 Run `test:security` before every release. See §6.
@@ -208,6 +212,37 @@ node create-stakeholder.mjs "Full Name" name@gyftr.net "Head of Something"
 ### Remove someone
 **Stakeholders → Deactivate.** This preserves their history. Deleting the auth
 user would orphan their assignments — deactivate instead.
+
+Deactivation takes effect on the **next request**, not the next login:
+`middleware/identity.js` checks `active` on every call, so a deactivated person
+with a still-valid token is refused immediately rather than up to an hour later.
+
+### Force everyone to set a new password
+The same script Marketing and Legal have. Use it after a shared password has
+been handed around, or if one is suspected of leaking.
+
+```bash
+cd scripts
+node force-password-reset.mjs --dry-run      # show who would be reset
+node force-password-reset.mjs                # reset everyone
+node force-password-reset.mjs --signout      # ...and end active sessions now
+node force-password-reset.mjs --only=a@gyftr.com,b@gyftr.com
+```
+
+It sets a temporary password (`TEMP_PASSWORD`, or `DEMO_PASSWORD`, from `.env` —
+there is deliberately no hard-coded default in this public repo), which puts the
+account into `FORCE_CHANGE_PASSWORD`. Cognito then answers the next sign-in with
+a challenge instead of a session, so nobody reaches the board without choosing
+their own password.
+
+**Without `--signout`, anyone already signed in keeps working until their token
+expires** — up to an hour. If you are resetting *because* something leaked, that
+is not what you want; pass `--signout`.
+
+It also sets `profiles.must_set_password` so the Stakeholders screen matches
+reality, and warns about Cognito accounts that have no profile in the database
+(they cannot sign in anyway, but their presence usually means someone was
+removed from the directory and not from the pool).
 
 ### Rotate the demo password
 ```bash

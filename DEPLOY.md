@@ -200,6 +200,17 @@ node onboard.mjs --apply
 touches tasks and never resets an existing person's password, so it is the safe
 one to run against a database that already holds real work.
 
+To put everyone back onto a temporary password — after a shared one has been
+handed around, or if one is suspected of leaking:
+
+```bash
+node force-password-reset.mjs --dry-run   # preview
+node force-password-reset.mjs --signout   # reset AND revoke live sessions
+```
+
+Without `--signout` anyone already signed in keeps working until their token
+expires, which is the wrong behaviour if you are reacting to a leak.
+
 `scripts/roster.json` is **gitignored** — this repository is public, and a
 directory of working corporate addresses is what gets scraped for phishing. See
 `scripts/roster.example.json`.
