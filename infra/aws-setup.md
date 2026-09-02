@@ -29,9 +29,10 @@ the differences are called out in boxes.
 > Express. This one decides them in Postgres Row-Level Security, and the backend
 > binds a verified identity to each transaction instead.
 >
-> For provisioning, this changes exactly one thing, in §3: **the database user
-> the backend connects as must not be a superuser.** Everything else is the
-> same. See [`../backend/sql/00_compat.sql`](../backend/sql/00_compat.sql).
+> For provisioning this changes one thing, in §2: there is a **one-time DBA
+> step** (`infra/dba-setup.sql`) and a specific requirement about which database
+> user the backend uses. Everything else is the same. See
+> [`../backend/sql/00_compat.sql`](../backend/sql/00_compat.sql).
 
 ---
 
@@ -69,59 +70,60 @@ build fails at `pre_build` with a login error, this is why.
 - Store the credentials in **Secrets Manager** (e.g. `gyftr/ceo/db`) with the
   standard RDS shape: `host`, `port`, `dbname`, `username`, `password`
 
-**No migration step.** The backend applies `backend/sql/*.sql` on every boot and
-every statement is idempotent, so the database builds itself the first time the
-service starts.
+**No migration step for the application.** The backend applies
+`backend/sql/*.sql` on every boot and every statement is idempotent, so the
+schema builds itself the first time the service starts.
 
-> ### Which database user the backend connects as
+> ### ⚠ One thing MUST be run by hand first, as the RDS master user
 >
-> **It must own the schema — use the RDS master user, or the owner of the
-> `gyftr_ceo` database.** Not a restricted application user.
->
-> This is not laziness about permissions; it is what the design requires:
->
->  - `00_compat.sql` creates a role and a schema, which needs `CREATEROLE` and
->    `CREATE` on the database.
->  - `08_grants.sql` grants privileges on every table to `authenticated`, which
->    only the owner can do.
->  - `db.js` re-applies all migrations on every boot, so these are not one-time
->    needs that can be dropped afterwards.
->
-> Row-level security is **not** weakened by connecting as the owner. Owners do
-> bypass RLS — which is exactly why every request runs `SET LOCAL ROLE
-> authenticated` first, switching to a non-owning role for the transaction. The
-> owner connection exists to *maintain* the schema; the `authenticated` role is
-> what serves requests. See `backend/sql/00_compat.sql`.
->
-> If you point the backend at a restricted user, expect it to fail at boot with
-> `permission denied to create role`. The migration now tells you the two
-> statements a superuser must run, but the simpler fix is to use the owner.
->
-> ### The one genuinely different thing on this portal
->
-> Authorization is enforced by RLS, and **PostgreSQL exempts a table's owner
-> from row-level security.** If the backend connects as a superuser (or as the
-> role that owns the tables *and* has `BYPASSRLS`), every policy in the schema
-> silently stops applying. Nothing errors. Every query still returns data — just
-> more of it than the caller should see.
->
-> The RDS master user created by `create-db-instance` is **not** a superuser and
-> does **not** have `BYPASSRLS`, so the default configuration is correct and you
-> do not need to do anything. The protection comes from `SET LOCAL ROLE
-> authenticated` on every request, which switches to a non-owning role.
->
-> What to avoid: do not grant the backend's user `rds_superuser` beyond what
-> RDS gives the master by default, and do not add `BYPASSRLS`. If you ever point
-> the backend at a *different* user from the one that ran the migrations, grant
-> it membership first, or every request fails on `SET ROLE`:
->
-> ```sql
-> grant authenticated to <the_backend_user>;
+> ```bash
+> psql "host=<rds-endpoint> dbname=<ceo-db> user=<master> sslmode=require" \
+>      -v app_user=<the user the backend connects as> \
+>      -f infra/dba-setup.sql
 > ```
 >
-> To confirm RLS is genuinely on in a deployed environment, run
-> `npm run test:security` against it. That suite exists precisely to answer this
-> question and takes a few seconds.
+> It installs `pgcrypto`, creates the `authenticated` role, grants it to the app
+> user, and makes that user own the schema. All four need privileges an
+> application user does not have, and without them the backend fails at boot
+> with `permission denied to create role` and retries forever.
+>
+> Run it **before** the first deploy. It is idempotent, so re-running is safe.
+>
+> Afterwards, `cd scripts && node doctor.mjs` reports the state of everything in
+> one pass — connection, extension, role, SET ROLE, every table's RLS and
+> policies, grants, and a live isolation test. Use it instead of redeploying to
+> find the next problem.
+
+### Which database user the backend connects as
+
+Two requirements, and they sound opposed until you see why they are not.
+
+**It must OWN the schema.** `dba-setup.sql` above arranges this. The backend
+re-applies its migrations on every boot, and `ALTER TABLE … ENABLE ROW LEVEL
+SECURITY`, all 19 `CREATE POLICY` statements and every `GRANT … TO
+authenticated` can only be run by the table owner. This is a standing
+requirement, not a one-off — a restricted user fails on every restart.
+
+**It must NOT have `BYPASSRLS`, and must not be a superuser.** PostgreSQL
+exempts those from row-level security entirely. Nothing would error; every query
+would just return more rows than the caller should see.
+
+The two fit together because of *when* each applies. The owner connection
+**maintains the schema**. Serving a request is different: `withUser()` runs
+`SET LOCAL ROLE authenticated` first, switching to a non-owning role for that
+transaction, and the policies apply normally. Ownership and enforcement never
+overlap.
+
+The RDS master user is neither a superuser nor `BYPASSRLS`-enabled by default,
+so pointing the backend at it — or at any user `dba-setup.sql` has made the
+owner — is correct. Just don't add `rds_superuser` or `BYPASSRLS` on top.
+
+To confirm RLS is genuinely applying in a deployed environment:
+
+```bash
+cd scripts && node doctor.mjs      # includes a live isolation test
+npm run test:security              # 41 tests, the thorough answer
+```
 
 ---
 

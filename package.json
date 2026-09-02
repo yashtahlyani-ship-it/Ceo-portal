@@ -16,7 +16,8 @@
     "seed": "npm --prefix scripts run seed",
     "onboard": "npm --prefix scripts run onboard",
     "docker:up": "docker compose up --build",
-    "docker:down": "docker compose down"
+    "docker:down": "docker compose down",
+    "doctor": "npm --prefix scripts run doctor"
   },
   "devDependencies": {
     "amazon-cognito-identity-js": "^6.3.12",

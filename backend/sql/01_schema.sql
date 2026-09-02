@@ -13,7 +13,24 @@
 --     it captures every path, not just the app's happy path.
 -- ════════════════════════════════════════════════════════════════════════════
 
-create extension if not exists "pgcrypto";  -- gen_random_uuid()
+-- pgcrypto provides gen_random_uuid() for profile ids. Installing an extension
+-- needs rds_superuser, which an application user does not have — so this is a
+-- no-op when it is already present (the normal case, since infra/dba-setup.sql
+-- installs it) and a clear instruction when it is not.
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pgcrypto') then
+    begin
+      create extension "pgcrypto";
+    exception
+      when insufficient_privilege then
+        raise exception
+          'SETUP INCOMPLETE: the pgcrypto extension is not installed and % cannot '
+          'install it. Run infra/dba-setup.sql as the RDS master user.',
+          current_user;
+    end;
+  end if;
+end $$;
 
 -- ── Enums ────────────────────────────────────────────────────────────────────
 do $$ begin

@@ -122,10 +122,29 @@ Health checks: `GET /` on 7868, `GET /health` on 7869.
 
 ## 2. Database
 
-**There is no migration step.** `backend/db.js` applies `backend/sql/*.sql` in
-filename order on every boot. Every statement is idempotent, so this is a no-op
-against an already-current database — deploying is just a restart, and nobody
-has to remember to run `psql`.
+**There is no migration step for the application.** `backend/db.js` applies
+`backend/sql/*.sql` in filename order on every boot. Every statement is
+idempotent, so this is a no-op against an already-current database — deploying
+is just a restart.
+
+**But a first-time database needs one manual step, as the RDS master user:**
+
+```bash
+psql "host=<rds-endpoint> dbname=<ceo-db> user=<master> sslmode=require" \
+     -v app_user=<the backend's DB user> \
+     -f infra/dba-setup.sql
+```
+
+That installs `pgcrypto`, creates the `authenticated` role, grants it to the app
+user and makes that user own the schema — four things the application user
+cannot do for itself. Skip it and the backend loops at boot on
+`permission denied to create role`.
+
+To check the state of a database without redeploying to find out:
+
+```bash
+cd scripts && node doctor.mjs
+```
 
 ```
 backend/sql/00_compat.sql      auth.uid() + the `authenticated` role  ← run first
@@ -220,6 +239,7 @@ directory of working corporate addresses is what gets scraped for phishing. See
 ## 5. Verify a release
 
 ```bash
+npm run doctor          # is this environment set up correctly? reports everything at once
 npm run test:unit       # 28 tests — no database needed, runs in CI on every push
 npm run test:security   # 41 tests against a REAL database, through the RLS path
 npm run test:api        # Cognito, S3 and onboarding against a DEPLOYED stack

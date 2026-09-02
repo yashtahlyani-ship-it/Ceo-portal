@@ -53,7 +53,24 @@
 --  definer functions as well and break every controlled mutation.
 -- ════════════════════════════════════════════════════════════════════════════
 
-create extension if not exists "pgcrypto";  -- gen_random_uuid()
+-- pgcrypto provides gen_random_uuid() for profile ids. Installing an extension
+-- needs rds_superuser, which an application user does not have — so this is a
+-- no-op when it is already present (the normal case, since infra/dba-setup.sql
+-- installs it) and a clear instruction when it is not.
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pgcrypto') then
+    begin
+      create extension "pgcrypto";
+    exception
+      when insufficient_privilege then
+        raise exception
+          'SETUP INCOMPLETE: the pgcrypto extension is not installed and % cannot '
+          'install it. Run infra/dba-setup.sql as the RDS master user.',
+          current_user;
+    end;
+  end if;
+end $$;
 
 -- ── The `authenticated` role ─────────────────────────────────────────────────
 -- NOLOGIN: nothing ever connects as this role directly. It is only ever
@@ -78,11 +95,11 @@ begin
     exception
       when insufficient_privilege then
         raise exception
-          'The role "authenticated" does not exist and % cannot create it. '
-          'Ask a superuser (the RDS master user) to run, once, against this database:  '
-          'CREATE ROLE authenticated NOLOGIN;  GRANT authenticated TO %;  '
-          'Then restart the service — migrations are idempotent and will continue.',
-          current_user, current_user;
+          'SETUP INCOMPLETE: the role "authenticated" does not exist and % cannot '
+          'create it. Run infra/dba-setup.sql as the RDS master user, once, against '
+          'this database — it does this and everything else the app user cannot do. '
+          'Then restart the service; migrations are idempotent and will continue.',
+          current_user;
     end;
   end if;
 end $$;
@@ -100,10 +117,10 @@ begin
     exception
       when insufficient_privilege then
         raise exception
-          '% is not a member of "authenticated" and cannot grant it to itself. '
-          'Ask a superuser to run:  GRANT authenticated TO %;  '
-          'Without this, every request fails on SET ROLE.',
-          current_user, current_user;
+          'SETUP INCOMPLETE: % is not a member of "authenticated" and cannot grant '
+          'it to itself. Run infra/dba-setup.sql as the RDS master user. Without this, '
+          'every request fails on SET ROLE.',
+          current_user;
     end;
   end if;
 end $$;

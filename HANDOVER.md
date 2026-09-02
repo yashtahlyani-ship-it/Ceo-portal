@@ -108,6 +108,7 @@ npm run test:unit       # 28 tests — pure logic + route safety. Needs no datab
 npm run test:security   # 41 tests against a REAL database
 npm run test:api        # Cognito/S3/onboarding against a DEPLOYED stack
 npm run seed            # (re)create demo accounts + demo tasks
+npm run doctor          # check a deployed environment end to end
 ```
 
 Admin scripts live in `scripts/` and talk to Cognito and the database directly:
@@ -137,6 +138,15 @@ not serve fails in ways that look like a data problem.
 **There is no migration step.** `backend/db.js` applies `backend/sql/*.sql` in
 filename order on every boot, and every statement is idempotent — so the database
 builds itself the first time the backend starts, and deploying is just a restart.
+
+**Except once, on a brand-new database.** `infra/dba-setup.sql` must be run by
+someone with the RDS master credentials: it installs `pgcrypto`, creates the
+`authenticated` role, grants it to the app user, and makes that user own the
+schema. An application user cannot do any of those, and without them the backend
+loops at boot on `permission denied to create role`.
+
+`cd scripts && node doctor.mjs` reports the state of all of it in one pass —
+use it rather than redeploying to discover the next problem.
 
 ```
 backend/sql/00_compat.sql      auth.uid() + the `authenticated` role  ← first
