@@ -59,21 +59,53 @@ create extension if not exists "pgcrypto";  -- gen_random_uuid()
 -- NOLOGIN: nothing ever connects as this role directly. It is only ever
 -- reached via SET LOCAL ROLE from an already-authenticated backend request,
 -- so it needs no password and must not be able to open a connection of its own.
-do $$ begin
-  create role authenticated nologin;
-exception when duplicate_object then null; end $$;
-
--- The connecting user must be a member of `authenticated` to SET ROLE to it.
--- On RDS the master user is not a superuser, so this grant is required — and
--- it is granted to whoever is applying the schema, which is by definition the
--- account the backend connects as.
+--
+-- Roles in PostgreSQL are CLUSTER-wide, not per-database, so on a shared RDS
+-- instance this role may already exist — created by another portal, or by a
+-- DBA ahead of this deploy. That is fine and is why existence is checked before
+-- creating: privileges are granted per-database (08_grants.sql), so two
+-- databases sharing the role name do not share any access.
+--
+-- Creating a role needs CREATEROLE, which a restricted application user does
+-- not have. Rather than failing with a bare "permission denied to create role"
+-- — which says nothing about what to do — say exactly which two statements a
+-- superuser needs to run.
 do $$
 begin
-  execute format('grant authenticated to %I', current_user);
-exception
-  -- Already a member, or current_user IS authenticated somehow. Both fine.
-  when duplicate_object then null;
-  when others then raise notice 'Could not grant authenticated to %: %', current_user, sqlerrm;
+  if not exists (select 1 from pg_roles where rolname = 'authenticated') then
+    begin
+      create role authenticated nologin;
+    exception
+      when insufficient_privilege then
+        raise exception
+          'The role "authenticated" does not exist and % cannot create it. '
+          'Ask a superuser (the RDS master user) to run, once, against this database:  '
+          'CREATE ROLE authenticated NOLOGIN;  GRANT authenticated TO %;  '
+          'Then restart the service — migrations are idempotent and will continue.',
+          current_user, current_user;
+    end;
+  end if;
+end $$;
+
+-- The connecting user must be a MEMBER of `authenticated` to SET ROLE to it.
+-- Granting a role to yourself requires ADMIN OPTION on it (or CREATEROLE), so
+-- this can legitimately fail for a restricted user — in which case a superuser
+-- has to do it, and the check below turns that into a clear instruction rather
+-- than a permission error thrown from the middle of the first request.
+do $$
+begin
+  if not pg_has_role(current_user, 'authenticated', 'member') then
+    begin
+      execute format('grant authenticated to %I', current_user);
+    exception
+      when insufficient_privilege then
+        raise exception
+          '% is not a member of "authenticated" and cannot grant it to itself. '
+          'Ask a superuser to run:  GRANT authenticated TO %;  '
+          'Without this, every request fails on SET ROLE.',
+          current_user, current_user;
+    end;
+  end if;
 end $$;
 
 -- ── `auth.uid()` ─────────────────────────────────────────────────────────────

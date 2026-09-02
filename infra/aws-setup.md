@@ -73,6 +73,30 @@ build fails at `pre_build` with a login error, this is why.
 every statement is idempotent, so the database builds itself the first time the
 service starts.
 
+> ### Which database user the backend connects as
+>
+> **It must own the schema — use the RDS master user, or the owner of the
+> `gyftr_ceo` database.** Not a restricted application user.
+>
+> This is not laziness about permissions; it is what the design requires:
+>
+>  - `00_compat.sql` creates a role and a schema, which needs `CREATEROLE` and
+>    `CREATE` on the database.
+>  - `08_grants.sql` grants privileges on every table to `authenticated`, which
+>    only the owner can do.
+>  - `db.js` re-applies all migrations on every boot, so these are not one-time
+>    needs that can be dropped afterwards.
+>
+> Row-level security is **not** weakened by connecting as the owner. Owners do
+> bypass RLS — which is exactly why every request runs `SET LOCAL ROLE
+> authenticated` first, switching to a non-owning role for the transaction. The
+> owner connection exists to *maintain* the schema; the `authenticated` role is
+> what serves requests. See `backend/sql/00_compat.sql`.
+>
+> If you point the backend at a restricted user, expect it to fail at boot with
+> `permission denied to create role`. The migration now tells you the two
+> statements a superuser must run, but the simpler fix is to use the owner.
+>
 > ### The one genuinely different thing on this portal
 >
 > Authorization is enforced by RLS, and **PostgreSQL exempts a table's owner
