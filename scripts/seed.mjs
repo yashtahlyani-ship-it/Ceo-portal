@@ -25,6 +25,17 @@ if (!DEMO_PASSWORD) {
   console.error('Set it to the password you want every demo account to share, then re-run.');
   process.exit(1);
 }
+
+// Without a user pool, ensureUser() writes profile rows and silently creates no
+// Cognito accounts — producing a database full of people who cannot sign in and
+// a demo that looks broken for a reason nothing reports. The other three
+// scripts already refuse this; so does this one.
+if (!hasCognito) {
+  console.error('COGNITO_USER_POOL_ID is not set in ../.env.');
+  console.error('Seeding without it would create profiles with no accounts behind them,');
+  console.error('and nobody could log in. Set it, then re-run.');
+  process.exit(1);
+}
 // Relative to the day the seed RUNS, so "overdue" and "due today" stay true
 // whenever someone demos this. A frozen date silently ages the whole dataset.
 const today = new Date();
